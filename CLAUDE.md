@@ -6,7 +6,22 @@ VRChat アバターの AFK アニメーションを非破壊で入れ替える N
 
 ## Current State
 
-設計フェーズ。repo 初期セットアップ済み。
+MVP 実装フェーズ。AFK ステートの走査・入れ替えロジック実装済み。Eku アバター（VRSuya テンプレ SubSM パターン）でビルド検証済み。
+
+### 実装済み
+- AfkStateScanner: AFK ステートを BFS 走査 + content/skeleton 分類（SubSM 内=content、root SM=skeleton）
+- AfkStateReplacer: SubSM パターン（content のみ入れ替え、skeleton 保持）と flat パターンの二系統
+- AfkChangerPlugin: NDMF Generating フェーズでビルドパス登録
+- ControllerDumper: デバッグ用 AnimatorController 構造ダンプ（Tools メニュー）
+
+### 設計判断
+- AFK SubStateMachine 内の全ステートを content として扱う（BFS で見つからない AFK_Outro も含む）
+- Prepare AFK / BlendOut AFK / Restore Tracking AFK は skeleton として保持（アバター固有の State Behaviour を維持）
+- 境界 Transition（skeleton↔content）を記録し、入れ替え後に再接続
+
+### 未実装（次フェーズ候補）
+- Action Layer 未設定（isDefault）時のハンドリング
+- target=SubSM / source=flat など混合パターン対応
 
 ## 入力
 
@@ -42,15 +57,21 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 
 1. アバターの Action Controller を取得（VRC Avatar Descriptor → Playable Layers → Action）
 
-2. Action Controller 内で `AFK` Bool を Transition 条件に使ってるステート群を走査・特定
+2. ターゲット / ソース両方を走査:
+   - BFS で AFK パラメータ関連ステートを検出
+   - SubStateMachine 内のステートを content（入れ替え対象）、root SM のステートを skeleton（保持）に分類
+   - AFK SubStateMachine 内の全ステートを content に含める（BFS で未検出のステートも）
 
-3. AFK ステート群を削除（Transition 含む）
+3. SubSM パターン（content が SubSM 内にある場合）:
+   - ターゲットの content SubStateMachine を丸ごと削除
+   - ソースの content ステートをターゲット root SM にコピー（State Behaviour 含む）
+   - skeleton → content の入口 Transition を再接続
+   - content → skeleton の出口 Transition を再接続
 
-4. ユーザー入力 Controller 内の AFK ステート群を走査・特定
-
-5. Action Controller に移植（State Behaviour 含む）
-
-6. AFK への入口・出口 Transition を繋ぎ直す
+4. flat パターン（全ステートが root SM にある場合）:
+   - ターゲットの全 AFK ステートを削除
+   - ソースの AFK ステートをコピー
+   - AnyState entry / exit を再接続
 
 ## NDMF フェーズ
 
@@ -102,7 +123,7 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 
 - commit / push は明示的な指示があるまで行わない
 
-- Runtime ファイルの namespace は `Sebanne.AfkChanger`、Editor ファイルの namespace は `Sebanne.AfkChanger.Editor` に統一する
+- Runtime ファイルの namespace は `Sebanne.AfkChanger`、Editor ファイルの namespace は `Sebanne.AfkChanger.Editor` に統一する（Core / Debug サブ namespace あり）
 
 ## 次フェーズ候補
 
@@ -113,3 +134,7 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 - Dry Run / Inspector プレビュー
 
 - MA Menu 連携
+
+- 混合パターン（target=SubSM / source=flat、またはその逆）のハンドリング
+
+- ステート名マッチ依存の再接続改善（名前が異なるアバター構成への対応）
