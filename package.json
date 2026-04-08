@@ -1,10 +1,18 @@
 {
-  "name": "com.sebanne.tool-template",
-  "displayName": "Sebanne Tool Template",
+  "name": "com.sebanne.afk-changer",
+  "displayName": "AFK Changer",
   "version": "0.1.0",
   "unity": "2022.3",
-  "description": "VRChat向けUnity Editorツールのテンプレートです。",
+  "description": "VRChat アバターの AFK アニメーションを非破壊で入れ替える NDMF プラグインです。",
+  "documentationUrl": "https://github.com/sebanne1225/afk-changer/blob/master/README.md",
+  "changelogUrl": "https://github.com/sebanne1225/afk-changer/blob/master/CHANGELOG.md",
+  "licensesUrl": "https://github.com/sebanne1225/afk-changer/blob/master/LICENSE",
+  "url": "https://github.com/sebanne1225/afk-changer",
   "author": {
     "name": "sebanne"
+  },
+  "vpmDependencies": {
+    "com.vrchat.avatars": ">=3.5.0",
+    "nadena.dev.ndmf": ">=1.4.0"
   }
 }

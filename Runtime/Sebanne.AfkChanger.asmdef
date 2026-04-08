@@ -1,6 +1,8 @@
 {
-  "name": "Sebanne.ToolTemplate",
-  "references": [],
+  "name": "Sebanne.AfkChanger",
+  "references": [
+    "VRC.SDK3A"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

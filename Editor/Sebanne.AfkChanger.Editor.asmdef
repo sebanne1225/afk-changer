@@ -1,7 +1,10 @@
 {
-  "name": "Sebanne.ToolTemplate.Editor",
+  "name": "Sebanne.AfkChanger.Editor",
   "references": [
-    "Sebanne.ToolTemplate"
+    "Sebanne.AfkChanger",
+    "nadena.dev.ndmf",
+    "VRC.SDK3A",
+    "VRC.SDK3A.Editor"
   ],
   "includePlatforms": [
     "Editor"
@@ -11,7 +14,9 @@
   "overrideReferences": false,
   "precompiledReferences": [],
   "autoReferenced": true,
-  "defineConstraints": [],
+  "defineConstraints": [
+    "UNITY_EDITOR"
+  ],
   "versionDefines": [],
   "noEngineReferences": false
 }
