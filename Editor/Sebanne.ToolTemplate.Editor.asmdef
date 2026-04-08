@@ -1,0 +1,17 @@
+{
+  "name": "Sebanne.ToolTemplate.Editor",
+  "references": [
+    "Sebanne.ToolTemplate"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

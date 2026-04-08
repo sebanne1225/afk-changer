@@ -1,0 +1,10 @@
+{
+  "name": "com.sebanne.tool-template",
+  "displayName": "Sebanne Tool Template",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "VRChat向けUnity Editorツールのテンプレートです。",
+  "author": {
+    "name": "sebanne"
+  }
+}
