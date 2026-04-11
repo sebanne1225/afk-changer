@@ -2,6 +2,7 @@ using nadena.dev.ndmf;
 using Sebanne.AfkChanger;
 using Sebanne.AfkChanger.Editor.Core;
 using UnityEditor.Animations;
+using UnityEngine;
 using VRC.SDK3.Avatars.Components;
 
 [assembly: ExportsPlugin(typeof(Sebanne.AfkChanger.Editor.AfkChangerPlugin))]
@@ -23,42 +24,49 @@ namespace Sebanne.AfkChanger.Editor
                     if (component == null)
                         return;
 
-                    var sourceController = component.SourceController as AnimatorController;
-                    if (sourceController == null)
+                    try
                     {
-                        AfkLog.Warn("Source controller is not set or not an AnimatorController. Skipping.");
-                        return;
-                    }
+                        var sourceController = component.SourceController as AnimatorController;
+                        if (sourceController == null)
+                        {
+                            AfkLog.Warn("Source controller is not set or not an AnimatorController. Skipping.");
+                            return;
+                        }
 
-                    var descriptor = ctx.AvatarRootObject.GetComponent<VRCAvatarDescriptor>();
-                    if (descriptor == null)
+                        var descriptor = ctx.AvatarRootObject.GetComponent<VRCAvatarDescriptor>();
+                        if (descriptor == null)
+                        {
+                            AfkLog.Error("VRCAvatarDescriptor not found.");
+                            return;
+                        }
+
+                        var actionController = FindActionController(descriptor);
+                        if (actionController == null)
+                        {
+                            AfkLog.Warn("Action layer controller not found or not set. Skipping.");
+                            return;
+                        }
+
+                        var targetScan = AfkStateScanner.Scan(actionController);
+                        var sourceScan = AfkStateScanner.Scan(sourceController);
+
+                        if (!sourceScan.HasAfkStates)
+                        {
+                            AfkLog.Error("No AFK states found in the source controller. " +
+                                         "Make sure the controller has transitions using the 'AFK' parameter.");
+                            return;
+                        }
+
+                        if (!targetScan.HasAfkStates)
+                            AfkLog.Info("No existing AFK states in the Action controller. " +
+                                        "Source AFK states will be added.");
+
+                        AfkStateReplacer.Replace(actionController, targetScan, sourceScan, sourceController);
+                    }
+                    finally
                     {
-                        AfkLog.Error("VRCAvatarDescriptor not found.");
-                        return;
+                        Object.DestroyImmediate(component);
                     }
-
-                    var actionController = FindActionController(descriptor);
-                    if (actionController == null)
-                    {
-                        AfkLog.Warn("Action layer controller not found or not set. Skipping.");
-                        return;
-                    }
-
-                    var targetScan = AfkStateScanner.Scan(actionController);
-                    var sourceScan = AfkStateScanner.Scan(sourceController);
-
-                    if (!sourceScan.HasAfkStates)
-                    {
-                        AfkLog.Error("No AFK states found in the source controller. " +
-                                     "Make sure the controller has transitions using the 'AFK' parameter.");
-                        return;
-                    }
-
-                    if (!targetScan.HasAfkStates)
-                        AfkLog.Info("No existing AFK states in the Action controller. " +
-                                    "Source AFK states will be added.");
-
-                    AfkStateReplacer.Replace(actionController, targetScan, sourceScan, sourceController);
                 });
         }
 
