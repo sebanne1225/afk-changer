@@ -1,6 +1,6 @@
 AFK Changer
 BOOTH 配布パッケージ案内
-version: 1.0.1
+version: 1.0.2
 
 このツールは、VRChat アバターの AFK アニメーションを非破壊で入れ替える
 NDMF プラグインです。

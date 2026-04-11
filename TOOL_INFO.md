@@ -9,7 +9,7 @@
 - 表示名: `AFK Changer`
 - Runtime asmdef: `Sebanne.AfkChanger`
 - Editor asmdef: `Sebanne.AfkChanger.Editor`
-- 現在 version: `1.0.1`
+- 現在 version: `1.0.2`
 
 ## 公開メタ情報
 

@@ -33,7 +33,7 @@ VRChat アバターの AFK アニメーションを非破壊で入れ替える N
 
 - repo: `https://github.com/sebanne1225/afk-changer`
 - Git URL や local package での導入は、開発確認や手動検証向けの補助導線です
-- GitHub Release の zip も補助導線として使えます。`com.sebanne.afk-changer-1.0.1.zip` を展開すると、直下に `package.json` が見える package 構成です
+- GitHub Release の zip も補助導線として使えます。`com.sebanne.afk-changer-1.0.2.zip` を展開すると、直下に `package.json` が見える package 構成です
 - これらの補助導線では、`VRChat Avatars` と `NDMF` の依存解決を自分で確認する必要があります
 
 ## 使い方

@@ -2,6 +2,12 @@
 
 このファイルは `AFK Changer` の変更履歴を管理します。
 
+## [1.0.2] - 2026-04-12
+
+### Fixed
+
+- AfkChangerComponent に IEditorOnly を実装し、VRChat SDK の validation 警告を解消
+
 ## [1.0.1] - 2026-04-12
 
 ### Fixed

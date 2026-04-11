@@ -5,7 +5,7 @@ namespace Sebanne.AfkChanger
 {
     [AddComponentMenu("Sebanne/AFK Changer")]
     [RequireComponent(typeof(VRCAvatarDescriptor))]
-    public sealed class AfkChangerComponent : MonoBehaviour
+    public sealed class AfkChangerComponent : MonoBehaviour, VRC.SDKBase.IEditorOnly
     {
         [SerializeField]
         private RuntimeAnimatorController _sourceController;

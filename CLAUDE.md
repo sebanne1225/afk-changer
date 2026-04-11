@@ -6,8 +6,9 @@ VRChat アバターの AFK アニメーションを非破壊で入れ替える N
 
 ## Current State
 
-version 1.0.1。v1.0.0 公開済み（GitHub Release / VPM listing / BOOTH）。
-v1.0.1 はビルド後のコンポーネント残留 fix。
+version 1.0.2。v1.0.0 公開済み（GitHub Release / VPM listing / BOOTH）。
+v1.0.1: ビルド後のコンポーネント残留 fix（DestroyImmediate）。
+v1.0.2: IEditorOnly 実装で SDK validation 警告を解消。
 
 ### 実装済み
 - AfkStateScanner: AFK ステートを BFS 走査 + content/skeleton 分類
