@@ -16,6 +16,7 @@ namespace Sebanne.AfkChanger.Editor
         protected override void Configure()
         {
             InPhase(BuildPhase.Generating)
+                .AfterPlugin("nadena.dev.modular-avatar")
                 .Run("Replace AFK states", ctx =>
                 {
                     var component = ctx.AvatarRootObject.GetComponent<AfkChangerComponent>();

@@ -2,10 +2,10 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Sebanne.AfkChanger.Editor.Core;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
-using VRC.SDK3.Avatars.Components;
 
 namespace Sebanne.AfkChanger.Editor.Debug
 {
@@ -79,34 +79,16 @@ namespace Sebanne.AfkChanger.Editor.Debug
         private static bool HasSelectedDescriptor()
         {
             var obj = Selection.activeGameObject;
-            return obj != null && obj.GetComponent<VRCAvatarDescriptor>() != null;
+            return obj != null && ActionControllerResolver.TryResolve(obj, out _) != null;
         }
 
         private static void DumpFromSelectedGameObject()
         {
             var obj = Selection.activeGameObject;
-            if (obj == null) return;
-
-            var descriptor = obj.GetComponent<VRCAvatarDescriptor>();
-            if (descriptor == null)
-            {
-                UnityEngine.Debug.LogWarning("[AFK Changer] Selected object has no VRCAvatarDescriptor.");
-                return;
-            }
-
-            var actionLayer = descriptor.baseAnimationLayers
-                .FirstOrDefault(l => l.type == VRCAvatarDescriptor.AnimLayerType.Action);
-
-            if (actionLayer.animatorController == null)
-            {
-                UnityEngine.Debug.LogWarning("[AFK Changer] VRCAvatarDescriptor has no Action Layer controller assigned.");
-                return;
-            }
-
-            var controller = actionLayer.animatorController as AnimatorController;
+            var controller = ActionControllerResolver.TryResolve(obj, out var error);
             if (controller == null)
             {
-                UnityEngine.Debug.LogWarning("[AFK Changer] Action Layer controller is not an AnimatorController.");
+                UnityEngine.Debug.LogWarning($"[AFK Changer] {error}");
                 return;
             }
 

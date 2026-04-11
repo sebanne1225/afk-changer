@@ -27,6 +27,12 @@ namespace Sebanne.AfkChanger.Editor.Core
                 return false;
             }
 
+            if (targetController.layers.Length == 0)
+            {
+                AfkLog.Error("Target controller has no layers.");
+                return false;
+            }
+
             var targetSm = targetController.layers[0].stateMachine;
 
             if (targetScan.HasSubStateMachineContent && sourceScan.HasSubStateMachineContent)
