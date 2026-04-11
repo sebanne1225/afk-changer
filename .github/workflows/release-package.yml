@@ -1,0 +1,105 @@
+name: Release Package
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read package metadata
+        id: metadata
+        shell: bash
+        run: |
+          python <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          data = json.loads(Path("package.json").read_text(encoding="utf-8"))
+          package_id = data["name"]
+          version = data["version"]
+          asset_name = f"{package_id}-{version}.zip"
+
+          github_output = Path(os.environ["GITHUB_OUTPUT"])
+          with github_output.open("a", encoding="utf-8") as fp:
+              fp.write(f"package_id={package_id}\n")
+              fp.write(f"version={version}\n")
+              fp.write(f"asset_name={asset_name}\n")
+          PY
+
+      - name: Validate release tag
+        if: github.event_name == 'release'
+        shell: bash
+        run: |
+          expected="${{ steps.metadata.outputs.version }}"
+          tag="${{ github.event.release.tag_name }}"
+          if [ "$tag" != "$expected" ] && [ "$tag" != "v$expected" ]; then
+            echo "Release tag '$tag' does not match package.json version '$expected'."
+            exit 1
+          fi
+
+      - name: Assemble package contents
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          staging_dir="$RUNNER_TEMP/package-root"
+          output_dir="$RUNNER_TEMP/package-output"
+          asset_path="$output_dir/${{ steps.metadata.outputs.asset_name }}"
+
+          rm -rf "$staging_dir" "$output_dir"
+          mkdir -p "$staging_dir" "$output_dir"
+
+          include_paths=(
+            "package.json"
+            "README.md"
+            "CHANGELOG.md"
+            "LICENSE"
+            "TOOL_INFO.md"
+            "Editor"
+            "Runtime"
+          )
+
+          for path in "${include_paths[@]}"; do
+            if [ -e "$path" ]; then
+              cp -R "$path" "$staging_dir/$path"
+            fi
+
+            if [ -e "$path.meta" ]; then
+              cp "$path.meta" "$staging_dir/$path.meta"
+            fi
+          done
+
+          (
+            cd "$staging_dir"
+            zip -r "$asset_path" . >/dev/null
+          )
+
+          echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload package artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.metadata.outputs.asset_name }}
+          path: ${{ steps.package.outputs.asset_path }}
+          if-no-files-found: error
+
+      - name: Upload asset to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.asset_path }}
+          overwrite_files: true
