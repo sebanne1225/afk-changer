@@ -1,15 +1,19 @@
-#if UNITY_EDITOR && AFK_CHANGER_DEBUG
+using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
+using VRC.SDK3.Avatars.Components;
 
 namespace Sebanne.AfkChanger.Editor.Debug
 {
     internal static class ControllerDumper
     {
-        private const string OutputPath = "Assets/_Temp/controller_dump.txt";
+        private const string OutputDir = "Assets/_Temp";
+
+        // --- Tools menu (existing) ---
 
         [MenuItem("Tools/AFK Changer/Dump Selected Controller")]
         private static void DumpSelected()
@@ -21,6 +25,105 @@ namespace Sebanne.AfkChanger.Editor.Debug
                 return;
             }
 
+            DumpAndWrite(controller);
+        }
+
+        [MenuItem("Tools/AFK Changer/Dump Selected Controller", true)]
+        private static bool DumpSelectedValidate()
+        {
+            return Selection.activeObject is AnimatorController;
+        }
+
+        // --- Assets context menu: AnimatorController ---
+
+        [MenuItem("Assets/AFK Changer/Dump Controller")]
+        private static void DumpControllerAsset()
+        {
+            var obj = Selection.activeObject;
+            if (obj is AnimatorController controller)
+                DumpAndWrite(controller);
+        }
+
+        [MenuItem("Assets/AFK Changer/Dump Controller", true)]
+        private static bool DumpControllerAssetValidate()
+        {
+            return Selection.activeObject is AnimatorController;
+        }
+
+        // --- Assets context menu: Prefab / Hierarchy: GameObject with VRCAvatarDescriptor ---
+
+        [MenuItem("Assets/AFK Changer/Dump Action Controller")]
+        private static void DumpFromAsset()
+        {
+            DumpFromSelectedGameObject();
+        }
+
+        [MenuItem("Assets/AFK Changer/Dump Action Controller", true)]
+        private static bool DumpFromAssetValidate()
+        {
+            return HasSelectedDescriptor();
+        }
+
+        [MenuItem("GameObject/AFK Changer/Dump Action Controller", false, 49)]
+        private static void DumpFromHierarchy()
+        {
+            DumpFromSelectedGameObject();
+        }
+
+        [MenuItem("GameObject/AFK Changer/Dump Action Controller", true)]
+        private static bool DumpFromHierarchyValidate()
+        {
+            return HasSelectedDescriptor();
+        }
+
+        private static bool HasSelectedDescriptor()
+        {
+            var obj = Selection.activeGameObject;
+            return obj != null && obj.GetComponent<VRCAvatarDescriptor>() != null;
+        }
+
+        private static void DumpFromSelectedGameObject()
+        {
+            var obj = Selection.activeGameObject;
+            if (obj == null) return;
+
+            var descriptor = obj.GetComponent<VRCAvatarDescriptor>();
+            if (descriptor == null)
+            {
+                UnityEngine.Debug.LogWarning("[AFK Changer] Selected object has no VRCAvatarDescriptor.");
+                return;
+            }
+
+            var actionLayer = descriptor.baseAnimationLayers
+                .FirstOrDefault(l => l.type == VRCAvatarDescriptor.AnimLayerType.Action);
+
+            if (actionLayer.animatorController == null)
+            {
+                UnityEngine.Debug.LogWarning("[AFK Changer] VRCAvatarDescriptor has no Action Layer controller assigned.");
+                return;
+            }
+
+            var controller = actionLayer.animatorController as AnimatorController;
+            if (controller == null)
+            {
+                UnityEngine.Debug.LogWarning("[AFK Changer] Action Layer controller is not an AnimatorController.");
+                return;
+            }
+
+            DumpAndWrite(controller);
+        }
+
+        // --- Core ---
+
+        private static void DumpAndWrite(AnimatorController controller)
+        {
+            var content = BuildDump(controller);
+            var path = WriteToFile(content, controller.name);
+            UnityEngine.Debug.Log($"[AFK Changer] Controller dump saved to {path}");
+        }
+
+        private static string BuildDump(AnimatorController controller)
+        {
             var sb = new StringBuilder();
             sb.AppendLine($"=== Controller: {controller.name} ===");
             sb.AppendLine();
@@ -44,20 +147,30 @@ namespace Sebanne.AfkChanger.Editor.Debug
                 DumpStateMachine(sb, layer.stateMachine, "  ");
             }
 
-            // Write file
-            var dir = Path.GetDirectoryName(OutputPath);
-            if (!Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-            File.WriteAllText(OutputPath, sb.ToString());
-            AssetDatabase.Refresh();
-
-            UnityEngine.Debug.Log($"[AFK Changer] Controller dump saved to {OutputPath}");
+            return sb.ToString();
         }
 
-        [MenuItem("Tools/AFK Changer/Dump Selected Controller", true)]
-        private static bool DumpSelectedValidate()
+        private static string WriteToFile(string content, string controllerName)
         {
-            return Selection.activeObject is AnimatorController;
+            if (!Directory.Exists(OutputDir))
+                Directory.CreateDirectory(OutputDir);
+
+            var safeName = SanitizeFileName(controllerName);
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var path = $"{OutputDir}/dump_{safeName}_{timestamp}.txt";
+
+            File.WriteAllText(path, content);
+            AssetDatabase.Refresh();
+            return path;
+        }
+
+        private static string SanitizeFileName(string name)
+        {
+            var invalid = Path.GetInvalidFileNameChars();
+            var sb = new StringBuilder(name.Length);
+            foreach (var c in name)
+                sb.Append(invalid.Contains(c) ? '_' : c);
+            return sb.ToString();
         }
 
         private static void DumpStateMachine(StringBuilder sb, AnimatorStateMachine sm, string indent)
@@ -204,4 +317,3 @@ namespace Sebanne.AfkChanger.Editor.Debug
         }
     }
 }
-#endif

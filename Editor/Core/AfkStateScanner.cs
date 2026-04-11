@@ -72,6 +72,15 @@ namespace Sebanne.AfkChanger.Editor.Core
                 }
             }
 
+            // Build entry source boundary: states that fire AFK If transitions are non-AFK triggers.
+            // BFS must not expand into them (prevents cascade through the entire controller).
+            var entrySourceStates = new HashSet<AnimatorState>();
+            foreach (var entry in result.EntryTransitions)
+            {
+                if (entry.SourceState != null)
+                    entrySourceStates.Add(entry.SourceState);
+            }
+
             // Step 2: BFS to find all AFK states
             while (entryQueue.Count > 0)
             {
@@ -96,7 +105,7 @@ namespace Sebanne.AfkChanger.Editor.Core
                         var subEntryStates = ResolveSubStateMachineEntry(t.destinationStateMachine);
                         foreach (var subEntry in subEntryStates)
                         {
-                            if (HasAfkFalseCondition(t))
+                            if (entrySourceStates.Contains(subEntry))
                             {
                                 result.ExitTransitions.Add(
                                     new AfkTransitionInfo(t, state, subEntry, false));
@@ -111,7 +120,7 @@ namespace Sebanne.AfkChanger.Editor.Core
 
                     if (t.destinationState == null) continue;
 
-                    if (HasAfkFalseCondition(t))
+                    if (entrySourceStates.Contains(t.destinationState))
                     {
                         result.ExitTransitions.Add(
                             new AfkTransitionInfo(t, state, t.destinationState, false));
