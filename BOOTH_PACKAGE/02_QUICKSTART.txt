@@ -1,0 +1,18 @@
+AFK Changer
+クイックスタート
+
+最短手順:
+1. アバタールートの Inspector で Add Component から AFK Changer を追加します
+2. 差し替え元の AFK モーションが入った Avatar または Prefab を ObjectField にドラッグします
+   （Action Controller が自動で取得されます）
+   または、AnimatorController を直接 Source Controller に指定することもできます
+3. アップロードします
+   NDMF がビルド時に自動で AFK ステートを入れ替えます
+
+補足:
+- このツールは非破壊で動作し、元のアバターや Animator には直接変更を加えません
+- ビルド時にクローン上で処理されるため、元データはそのまま残ります
+- コンポーネントを外すだけで元の AFK に戻せます
+- Modular Avatar (MA) は optional です（未導入でも動作します）
+- AnimationClip 単体での差し替えは未対応です（AnimatorController を入力してください）
+- 詳しい制限事項は README を確認してください
