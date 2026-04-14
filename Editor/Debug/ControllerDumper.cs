@@ -79,13 +79,13 @@ namespace Sebanne.AfkChanger.Editor.Debug
         private static bool HasSelectedDescriptor()
         {
             var obj = Selection.activeGameObject;
-            return obj != null && ActionControllerResolver.TryResolve(obj, out _) != null;
+            return obj != null && ActionControllerResolver.TryResolve(obj, VRC.SDK3.Avatars.Components.VRCAvatarDescriptor.AnimLayerType.Action, out _) != null;
         }
 
         private static void DumpFromSelectedGameObject()
         {
             var obj = Selection.activeGameObject;
-            var controller = ActionControllerResolver.TryResolve(obj, out var error);
+            var controller = ActionControllerResolver.TryResolve(obj, VRC.SDK3.Avatars.Components.VRCAvatarDescriptor.AnimLayerType.Action, out var error);
             if (controller == null)
             {
                 UnityEngine.Debug.LogWarning($"[AFK Changer] {error}");

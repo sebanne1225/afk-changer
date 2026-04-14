@@ -26,13 +26,6 @@ namespace Sebanne.AfkChanger.Editor
 
                     try
                     {
-                        var sourceController = component.SourceController as AnimatorController;
-                        if (sourceController == null)
-                        {
-                            AfkLog.Warn("Source controller is not set or not an AnimatorController. Skipping.");
-                            return;
-                        }
-
                         var descriptor = ctx.AvatarRootObject.GetComponent<VRCAvatarDescriptor>();
                         if (descriptor == null)
                         {
@@ -40,28 +33,53 @@ namespace Sebanne.AfkChanger.Editor
                             return;
                         }
 
-                        var actionController = FindActionController(descriptor);
-                        if (actionController == null)
+                        // --- Action Layer replacement ---
+                        var sourceController = component.SourceController as AnimatorController;
+                        if (sourceController != null)
                         {
-                            AfkLog.Warn("Action layer controller not found or not set. Skipping.");
-                            return;
+                            var actionController = FindActionController(descriptor);
+                            if (actionController != null)
+                            {
+                                var targetScan = AfkStateScanner.Scan(actionController);
+                                var sourceScan = AfkStateScanner.Scan(sourceController);
+
+                                if (!sourceScan.HasAfkStates)
+                                {
+                                    AfkLog.Error("No AFK states found in the source controller. " +
+                                                 "Make sure the controller has transitions using the 'AFK' parameter.");
+                                }
+                                else
+                                {
+                                    if (!targetScan.HasAfkStates)
+                                        AfkLog.Info("No existing AFK states in the Action controller. " +
+                                                    "Source AFK states will be added.");
+
+                                    AfkStateReplacer.Replace(actionController, targetScan, sourceScan, sourceController);
+                                }
+                            }
+                            else
+                            {
+                                AfkLog.Warn("Action layer controller not found or not set. Skipping Action replacement.");
+                            }
                         }
 
-                        var targetScan = AfkStateScanner.Scan(actionController);
-                        var sourceScan = AfkStateScanner.Scan(sourceController);
-
-                        if (!sourceScan.HasAfkStates)
+                        // --- FX Layer clean ---
+                        if (component.FxMode == AfkFxMode.Clean)
                         {
-                            AfkLog.Error("No AFK states found in the source controller. " +
-                                         "Make sure the controller has transitions using the 'AFK' parameter.");
-                            return;
+                            var fxController = FindFxController(descriptor);
+                            if (fxController != null)
+                            {
+                                var fxScans = AfkStateScanner.ScanFxLayers(fxController);
+                                if (fxScans.Count > 0)
+                                    AfkFxProcessor.Clean(fxController, fxScans);
+                                else
+                                    AfkLog.Info("No AFK states found in FX layer.");
+                            }
+                            else
+                            {
+                                AfkLog.Info("FX layer controller not found or not set. Skipping FX clean.");
+                            }
                         }
-
-                        if (!targetScan.HasAfkStates)
-                            AfkLog.Info("No existing AFK states in the Action controller. " +
-                                        "Source AFK states will be added.");
-
-                        AfkStateReplacer.Replace(actionController, targetScan, sourceScan, sourceController);
                     }
                     finally
                     {
@@ -72,9 +90,21 @@ namespace Sebanne.AfkChanger.Editor
 
         private static AnimatorController FindActionController(VRCAvatarDescriptor descriptor)
         {
+            return FindLayerController(descriptor, VRCAvatarDescriptor.AnimLayerType.Action);
+        }
+
+        private static AnimatorController FindFxController(VRCAvatarDescriptor descriptor)
+        {
+            return FindLayerController(descriptor, VRCAvatarDescriptor.AnimLayerType.FX);
+        }
+
+        private static AnimatorController FindLayerController(
+            VRCAvatarDescriptor descriptor,
+            VRCAvatarDescriptor.AnimLayerType layerType)
+        {
             foreach (var layer in descriptor.baseAnimationLayers)
             {
-                if (layer.type != VRCAvatarDescriptor.AnimLayerType.Action)
+                if (layer.type != layerType)
                     continue;
 
                 if (layer.isDefault || layer.animatorController == null)

@@ -52,6 +52,20 @@ namespace Sebanne.AfkChanger.Editor.Core
             new List<AfkTransitionInfo>();
     }
 
+    internal sealed class AfkFxLayerScanResult
+    {
+        internal int LayerIndex { get; }
+        internal string LayerName { get; }
+        internal AfkScanResult ScanResult { get; }
+
+        internal AfkFxLayerScanResult(int layerIndex, string layerName, AfkScanResult scanResult)
+        {
+            LayerIndex = layerIndex;
+            LayerName = layerName;
+            ScanResult = scanResult;
+        }
+    }
+
     internal sealed class AfkTransitionInfo
     {
         internal AnimatorStateTransition Transition { get; }

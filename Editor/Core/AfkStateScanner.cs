@@ -10,18 +10,56 @@ namespace Sebanne.AfkChanger.Editor.Core
 
         internal static AfkScanResult Scan(AnimatorController controller)
         {
-            var result = new AfkScanResult();
-
             if (controller == null || controller.layers.Length == 0)
-                return result;
+                return new AfkScanResult();
 
             if (!HasAfkParameter(controller))
             {
                 AfkLog.Info($"Controller '{controller.name}' has no AFK parameter.");
-                return result;
+                return new AfkScanResult();
             }
 
-            var rootSm = controller.layers[0].stateMachine;
+            var result = ScanStateMachine(controller.layers[0].stateMachine);
+
+            if (result.HasAfkStates)
+            {
+                var contentCount = result.ContentStates.Count;
+                var skeletonCount = result.AfkStates.Count - contentCount;
+                AfkLog.Info($"Scanned '{controller.name}': {contentCount} content + {skeletonCount} skeleton AFK state(s), " +
+                            $"{result.EntryTransitions.Count} entry, {result.ExitTransitions.Count} exit, " +
+                            $"subSM={result.HasSubStateMachineContent}.");
+            }
+
+            return result;
+        }
+
+        internal static List<AfkFxLayerScanResult> ScanFxLayers(AnimatorController controller)
+        {
+            var results = new List<AfkFxLayerScanResult>();
+
+            if (controller == null || controller.layers.Length == 0)
+                return results;
+
+            if (!HasAfkParameter(controller))
+                return results;
+
+            for (var i = 0; i < controller.layers.Length; i++)
+            {
+                var layer = controller.layers[i];
+                var scan = ScanStateMachine(layer.stateMachine);
+                if (scan.HasAfkStates)
+                {
+                    results.Add(new AfkFxLayerScanResult(i, layer.name, scan));
+                    AfkLog.Info($"FX layer '{layer.name}' (index {i}): {scan.AfkStates.Count} AFK state(s).");
+                }
+            }
+
+            return results;
+        }
+
+        private static AfkScanResult ScanStateMachine(AnimatorStateMachine rootSm)
+        {
+            var result = new AfkScanResult();
 
             // Build ownership map for all states in the entire hierarchy
             var ownership = new Dictionary<AnimatorState, AnimatorStateMachine>();
@@ -137,15 +175,6 @@ namespace Sebanne.AfkChanger.Editor.Core
 
             // Step 3: Determine primary entry state (from content states)
             DetermineEntryState(result);
-
-            if (result.HasAfkStates)
-            {
-                var contentCount = result.ContentStates.Count;
-                var skeletonCount = result.AfkStates.Count - contentCount;
-                AfkLog.Info($"Scanned '{controller.name}': {contentCount} content + {skeletonCount} skeleton AFK state(s), " +
-                            $"{result.EntryTransitions.Count} entry, {result.ExitTransitions.Count} exit, " +
-                            $"subSM={result.HasSubStateMachineContent}.");
-            }
 
             return result;
         }

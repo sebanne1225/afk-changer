@@ -8,11 +8,14 @@ namespace Sebanne.AfkChanger.Editor.Core
     internal static class ActionControllerResolver
     {
         /// <summary>
-        /// Attempts to extract the Action Layer AnimatorController from a GameObject
-        /// via its VRCAvatarDescriptor.
+        /// Attempts to extract an AnimatorController for the specified layer type
+        /// from a GameObject via its VRCAvatarDescriptor.
         /// Returns null on failure with a descriptive error message.
         /// </summary>
-        internal static AnimatorController TryResolve(GameObject obj, out string error)
+        internal static AnimatorController TryResolve(
+            GameObject obj,
+            VRCAvatarDescriptor.AnimLayerType layerType,
+            out string error)
         {
             error = null;
 
@@ -29,19 +32,19 @@ namespace Sebanne.AfkChanger.Editor.Core
                 return null;
             }
 
-            var actionLayer = descriptor.baseAnimationLayers
-                .FirstOrDefault(l => l.type == VRCAvatarDescriptor.AnimLayerType.Action);
+            var layer = descriptor.baseAnimationLayers
+                .FirstOrDefault(l => l.type == layerType);
 
-            if (actionLayer.animatorController == null)
+            if (layer.animatorController == null)
             {
-                error = "Action Layer の AnimatorController が未設定です。";
+                error = $"{layerType} Layer の AnimatorController が未設定です。";
                 return null;
             }
 
-            var controller = actionLayer.animatorController as AnimatorController;
+            var controller = layer.animatorController as AnimatorController;
             if (controller == null)
             {
-                error = "Action Layer のコントローラーが AnimatorController ではありません。";
+                error = $"{layerType} Layer のコントローラーが AnimatorController ではありません。";
                 return null;
             }
 
