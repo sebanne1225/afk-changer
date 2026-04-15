@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
+using VRC.SDK3.Avatars.ScriptableObjects;
 
 namespace Sebanne.AfkManager
 {
@@ -26,6 +27,11 @@ namespace Sebanne.AfkManager
         // === Action ===
         public bool removeActionAfk;
         public List<AfkSlot> actionSources = new();
+
+        // === Menu ===
+        public VRCExpressionsMenu menuInstallTarget;
+        public int defaultSlotIndex = -1;
+        public string originalAfkMenuName = "元の AFK";
 
         // === FX ===
         public bool removeFxAfk;

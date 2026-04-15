@@ -26,10 +26,14 @@ namespace Sebanne.AfkManager.Editor
                     if (!NeedsModularAvatar(component)) return;
 
 #if HAS_MODULAR_AVATAR
+                    var defaultSlot = ResolveDefaultSlot(component);
                     AfkMenuGenerator.Generate(
                         ctx.AvatarRootObject,
                         component.actionSources,
-                        component.removeActionAfk);
+                        component.removeActionAfk,
+                        component.menuInstallTarget,
+                        defaultSlot,
+                        component.originalAfkMenuName);
 #else
                     AfkLog.Error("Modular Avatar is required for multi-slot AFK configuration. " +
                                  "Install Modular Avatar to use this feature.");
@@ -53,7 +57,8 @@ namespace Sebanne.AfkManager.Editor
                             return;
                         }
 
-                        ProcessAction(component, descriptor);
+                        var defaultSlot = ResolveDefaultSlot(component);
+                        ProcessAction(component, descriptor, defaultSlot);
                         ProcessFx(component, descriptor);
                     }
                     finally
@@ -67,7 +72,7 @@ namespace Sebanne.AfkManager.Editor
         // Action processing
         // =====================================================================
 
-        private static void ProcessAction(AfkManagerComponent component, VRCAvatarDescriptor descriptor)
+        private static void ProcessAction(AfkManagerComponent component, VRCAvatarDescriptor descriptor, int defaultSlot)
         {
             var actionController = FindLayerController(descriptor, VRCAvatarDescriptor.AnimLayerType.Action);
             if (actionController == null)
@@ -101,7 +106,7 @@ namespace Sebanne.AfkManager.Editor
             {
                 // Delete all, then Add each slot
                 AfkOperationEngine.Delete(ctx);
-                AfkOperationEngine.EnsureSlotParameter(actionController);
+                AfkOperationEngine.EnsureSlotParameter(actionController, defaultSlot);
 
                 var blendOut = ctx.NeedsBlendOut
                     ? AfkOperationEngine.CreateSharedBlendOut(ctx)
@@ -121,7 +126,7 @@ namespace Sebanne.AfkManager.Editor
             else if (resolved.Count > 0)
             {
                 // Add: keep original, add new slots alongside
-                AfkOperationEngine.EnsureSlotParameter(actionController);
+                AfkOperationEngine.EnsureSlotParameter(actionController, defaultSlot);
                 AfkOperationEngine.AddSlotConditionToExistingEntries(ctx, 0);
 
                 var blendOut = ctx.NeedsBlendOut
@@ -200,6 +205,16 @@ namespace Sebanne.AfkManager.Editor
         {
             var sourceCount = component.actionSources.Count;
             return sourceCount >= 2 || (!component.removeActionAfk && sourceCount >= 1);
+        }
+
+        private static int ResolveDefaultSlot(AfkManagerComponent component)
+        {
+            var minSlot = component.removeActionAfk ? 1 : 0;
+            var maxSlot = component.actionSources.Count;
+            var value = component.defaultSlotIndex;
+            if (value < 0 || value < minSlot || value > maxSlot)
+                return minSlot;
+            return value;
         }
 
         private static AnimatorController ResolveSlotController(AfkSlot slot)

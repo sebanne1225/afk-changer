@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Sebanne.AfkManager;
 using Sebanne.AfkManager.Editor.Core;
 using UnityEditor;
@@ -114,6 +115,25 @@ namespace Sebanne.AfkManager.Editor
             // Remove checkbox
             EditorGUILayout.PropertyField(_removeActionAfkProp, new GUIContent("元の AFK を外す"));
 
+            // Original AFK menu name + default checkbox (only when keeping original + MA needed)
+            if (!_removeActionAfkProp.boolValue && NeedsModularAvatar())
+            {
+                const float checkWidth = 80f;
+                var row = EditorGUILayout.GetControlRect();
+
+                var nameRect = new Rect(row.x, row.y, row.width - checkWidth, row.height);
+                var nameProp = serializedObject.FindProperty("originalAfkMenuName");
+                EditorGUI.PropertyField(nameRect, nameProp, new GUIContent("メニュー名"));
+
+                var defaultProp = serializedObject.FindProperty("defaultSlotIndex");
+                var resolved = defaultProp.intValue >= 0 ? defaultProp.intValue : 0;
+                var isDefault = resolved == 0;
+                var checkRect = new Rect(row.xMax - checkWidth, row.y, checkWidth, row.height);
+                var newDefault = EditorGUI.ToggleLeft(checkRect, "デフォルト", isDefault);
+                if (newDefault != isDefault)
+                    defaultProp.intValue = newDefault ? 0 : -1;
+            }
+
             EditorGUILayout.Space(4);
 
             // Slot list
@@ -162,6 +182,7 @@ namespace Sebanne.AfkManager.Editor
             {
 #if HAS_MODULAR_AVATAR
                 EditorGUILayout.HelpBox("Expression Menu で切り替え", MessageType.Info);
+                DrawMenuInstallTarget();
 #else
                 EditorGUILayout.HelpBox("Modular Avatar が必要です", MessageType.Warning);
 #endif
@@ -286,12 +307,24 @@ namespace Sebanne.AfkManager.Editor
             RefreshSlotScan(index);
             DrawSlotScanInfo(scanRect, index);
 
-            // Row 2: SlotName (only when MA is needed)
+            // Row 2: SlotName + Default checkbox (only when MA is needed)
             if (NeedsModularAvatar())
             {
                 y += lineHeight + spacing;
-                var nameRect = new Rect(rect.x, y, rect.width, lineHeight);
-                EditorGUI.PropertyField(nameRect, slotNameProp, new GUIContent("スロット名"));
+                const float checkWidth = 80f;
+
+                var nameRect = new Rect(rect.x, y, rect.width - checkWidth, lineHeight);
+                EditorGUI.PropertyField(nameRect, slotNameProp, new GUIContent("メニュー名"));
+
+                var slotIndex = index + 1;
+                var defaultProp = serializedObject.FindProperty("defaultSlotIndex");
+                var autoFallback = _removeActionAfkProp.boolValue ? 1 : 0;
+                var resolved = defaultProp.intValue >= 0 ? defaultProp.intValue : autoFallback;
+                var isDefault = resolved == slotIndex;
+                var checkRect = new Rect(rect.xMax - checkWidth, y, checkWidth, lineHeight);
+                var newDefault = EditorGUI.ToggleLeft(checkRect, "デフォルト", isDefault);
+                if (newDefault != isDefault)
+                    defaultProp.intValue = newDefault ? slotIndex : -1;
             }
         }
 
@@ -584,18 +617,54 @@ namespace Sebanne.AfkManager.Editor
         private static void ScanAvatarPrefabs()
         {
             var guids = AssetDatabase.FindAssets("t:Prefab");
-            var prefabs = new List<GameObject>();
-            var names = new List<string>();
+            var raw = new List<(GameObject prefab, RuntimeAnimatorController action, RuntimeAnimatorController fx)>();
 
             foreach (var guid in guids)
             {
                 var path = AssetDatabase.GUIDToAssetPath(guid);
                 var go = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-                if (go != null && go.GetComponent<VRCAvatarDescriptor>() != null)
+                if (go == null) continue;
+                var desc = go.GetComponent<VRCAvatarDescriptor>();
+                if (desc == null) continue;
+
+                RuntimeAnimatorController action = null, fx = null;
+                foreach (var layer in desc.baseAnimationLayers)
                 {
-                    prefabs.Add(go);
-                    names.Add(go.name);
+                    if (layer.type == VRCAvatarDescriptor.AnimLayerType.Action && !layer.isDefault)
+                        action = layer.animatorController;
+                    else if (layer.type == VRCAvatarDescriptor.AnimLayerType.FX && !layer.isDefault)
+                        fx = layer.animatorController;
                 }
+
+                raw.Add((go, action, fx));
+            }
+
+            // Group by (Action, FX) controller pair
+            var groups = new Dictionary<(int, int), List<GameObject>>();
+            foreach (var entry in raw)
+            {
+                var key = (
+                    entry.action != null ? entry.action.GetInstanceID() : 0,
+                    entry.fx != null ? entry.fx.GetInstanceID() : 0
+                );
+                if (!groups.TryGetValue(key, out var list))
+                {
+                    list = new List<GameObject>();
+                    groups[key] = list;
+                }
+                list.Add(entry.prefab);
+            }
+
+            var prefabs = new List<GameObject>();
+            var names = new List<string>();
+
+            foreach (var group in groups.Values)
+            {
+                group.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.Ordinal));
+                prefabs.Add(group[0]);
+                names.Add(group.Count == 1
+                    ? group[0].name
+                    : $"{group[0].name} ({group.Count} variants)");
             }
 
             _avatarPrefabs = prefabs.ToArray();
@@ -644,6 +713,78 @@ namespace Sebanne.AfkManager.Editor
             var removeAction = _removeActionAfkProp.boolValue;
             return sourceCount >= 2 || (!removeAction && sourceCount >= 1);
         }
+
+#if HAS_MODULAR_AVATAR
+        // --- Menu tree reflection (static, one-time init) ---
+        private static bool _menuTreeChecked;
+        private static MethodInfo _menuTreeShowMethod;
+
+        private static MethodInfo GetMenuTreeShowMethod()
+        {
+            if (_menuTreeChecked) return _menuTreeShowMethod;
+            _menuTreeChecked = true;
+            try
+            {
+                var asm = Assembly.Load("nadena.dev.modular-avatar.core.editor");
+                var type = asm?.GetType("nadena.dev.modular_avatar.core.editor.AvMenuTreeViewWindow");
+                _menuTreeShowMethod = type?.GetMethod("Show", BindingFlags.Static | BindingFlags.NonPublic);
+            }
+            catch
+            {
+                _menuTreeShowMethod = null;
+            }
+            return _menuTreeShowMethod;
+        }
+
+        private void DrawMenuInstallTarget()
+        {
+            var prop = serializedObject.FindProperty("menuInstallTarget");
+            EditorGUILayout.PropertyField(prop, new GUIContent("メニュー配置先"));
+
+            if (prop.objectReferenceValue == null)
+                EditorGUILayout.LabelField(" ", "トップメニュー直下", EditorStyles.miniLabel);
+
+            var showMethod = GetMenuTreeShowMethod();
+            if (showMethod != null)
+            {
+                if (GUILayout.Button("メニューを選択"))
+                {
+                    try
+                    {
+                        var descriptor = ((Component)target).GetComponent<VRCAvatarDescriptor>();
+                        Action<object> callback = selected =>
+                        {
+                            if (selected is ValueTuple<object, object> vt)
+                                selected = vt.Item1;
+                            if (selected is nadena.dev.modular_avatar.core.ModularAvatarMenuItem item
+                                && item.MenuSource == nadena.dev.modular_avatar.core.SubmenuSource.MenuAsset
+                                && item.Control?.subMenu != null)
+                                selected = item.Control.subMenu;
+
+                            if (selected is VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionsMenu expMenu)
+                            {
+                                prop.objectReferenceValue = (expMenu == descriptor.expressionsMenu) ? null : expMenu;
+                            }
+                            else
+                            {
+                                if (selected != null)
+                                    AfkLog.Warn("MA コンポーネントで構成されたサブメニューへの配置は非対応です。" +
+                                                "VRCExpressionsMenu アセットを配置先に指定してください。");
+                                prop.objectReferenceValue = null;
+                            }
+                            serializedObject.ApplyModifiedProperties();
+                        };
+                        showMethod.Invoke(null, new object[] { descriptor, null, callback });
+                    }
+                    catch (Exception e)
+                    {
+                        AfkLog.Warn($"メニュー選択を開けませんでした: {e.Message}");
+                    }
+                }
+            }
+
+        }
+#endif
 
         private static string FormatScanResult(AfkScanResult scan)
         {

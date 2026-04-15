@@ -28,10 +28,10 @@ Component/Inspector 詳細設計確定（付け外し型 UI）。
 - AfkOperationEngine: Delete + Replace + Add の 3 操作。AfkOperationContext で Action/FX 差異を吸収
   - Delete: 全 AFK ステート削除（standalone。BlendOut なし）
   - Replace: SubSM / flat パターンの content 入れ替え（skeleton 保持）
-  - Add: ソース content を並列追加（AnyState 入口 + AfkManagerSlot 条件で入口分岐）
+  - Add: ソース content を並列追加（ターゲットの元入口遷移を複製 + AfkManagerSlot 条件で入口分岐）
   - AddSlotConditionToExistingEntries: 既存 AFK 入口に AfkManagerSlot 条件を追加
   - EnsureSlotParameter: AfkManagerSlot Int パラメータ追加
-  - 入口: AnyState は使わない（Replace）。Add では AnyState + AfkManagerSlot 条件
+  - 入口: ターゲットの元の入口遷移を複製して遷移先を付け替え + AfkManagerSlot 条件（Replace / Add 共通）
   - 出口: コンテンツ境界ベース（NeedsBlendOut で制御。複数 Add では共有 BlendOut）
   - TrackingControl / PlayableLayerControl 自動付与（NeedsBehaviours で制御）
 - AfkOperationContext: ForAction / ForFxLayer ファクトリ。NeedsBlendOut / NeedsBehaviours / EntryBlendDuration を保持

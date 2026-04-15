@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using nadena.dev.modular_avatar.core;
 using UnityEngine;
+using VRC.SDK3.Avatars.ScriptableObjects;
 
 namespace Sebanne.AfkManager.Editor.Core
 {
@@ -10,12 +11,23 @@ namespace Sebanne.AfkManager.Editor.Core
         internal static void Generate(
             GameObject avatarRoot,
             List<AfkSlot> slots,
-            bool removeActionAfk)
+            bool removeActionAfk,
+            VRCExpressionsMenu installTarget,
+            int defaultSlot,
+            string originalMenuName)
         {
-            var defaultSlot = removeActionAfk ? 1 : 0;
-
             var menuObj = new GameObject("AFK Manager");
             menuObj.transform.SetParent(avatarRoot.transform, false);
+
+            // Menu installer (MA discovery point)
+            var menuInstaller = menuObj.AddComponent<ModularAvatarMenuInstaller>();
+            if (installTarget != null)
+                menuInstaller.installTargetMenu = installTarget;
+
+            // Parent menu item (SubMenu containing children)
+            var parentMenuItem = menuObj.AddComponent<ModularAvatarMenuItem>();
+            parentMenuItem.PortableControl.Type = PortableControlType.SubMenu;
+            parentMenuItem.MenuSource = SubmenuSource.Children;
 
             // Parameter declaration
             var maParams = menuObj.AddComponent<ModularAvatarParameters>();
@@ -27,7 +39,23 @@ namespace Sebanne.AfkManager.Editor.Core
                 saved = true
             });
 
-            // Menu items per slot
+            // Slot 0: original AFK (only when keeping original)
+            if (!removeActionAfk)
+            {
+                var slot0Name = string.IsNullOrEmpty(originalMenuName) ? "元の AFK" : originalMenuName;
+                var slot0Obj = new GameObject(slot0Name);
+                slot0Obj.transform.SetParent(menuObj.transform, false);
+
+                var slot0Item = slot0Obj.AddComponent<ModularAvatarMenuItem>();
+                slot0Item.PortableControl.Type = PortableControlType.Toggle;
+                slot0Item.PortableControl.Parameter = AfkOperationEngine.SlotParameterName;
+                slot0Item.PortableControl.Value = 0;
+                slot0Item.isSynced = true;
+                slot0Item.isSaved = true;
+                slot0Item.isDefault = defaultSlot == 0;
+            }
+
+            // Menu items per added slot
             for (var i = 0; i < slots.Count; i++)
             {
                 var slotIndex = i + 1;
@@ -47,7 +75,8 @@ namespace Sebanne.AfkManager.Editor.Core
                 menuItem.isDefault = slotIndex == defaultSlot;
             }
 
-            AfkLog.Info($"Generated MA menu: {slots.Count} slot(s), default={defaultSlot}.");
+            var totalItems = removeActionAfk ? slots.Count : slots.Count + 1;
+            AfkLog.Info($"Generated MA menu: {totalItems} item(s), default={defaultSlot}.");
         }
     }
 }

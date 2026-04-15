@@ -84,18 +84,38 @@ namespace Sebanne.AfkManager.Editor.Core
             // Step 2: Copy internal transitions
             CopyInternalTransitions(sourceScan.ContentStates, mapping);
 
-            // Step 3: Create AnyState entry with slot conditions
+            // Step 3: Create per-state entry transitions with slot conditions
+            // (mirrors target's original entry pattern to avoid AnyState re-fire during AFK)
             if (sourceScan.EntryState != null && mapping.ContainsKey(sourceScan.EntryState))
             {
                 var newEntry = mapping[sourceScan.EntryState];
-                var t = rootSm.AddAnyStateTransition(newEntry);
-                t.hasExitTime = false;
-                t.duration = 0f;
-                t.hasFixedDuration = true;
-                t.canTransitionToSelf = false;
-                t.AddCondition(AnimatorConditionMode.If, 0f, "AFK");
-                t.AddCondition(AnimatorConditionMode.Equals, slotIndex, SlotParameterName);
-                AfkLog.Info($"Entry: AnyState → {newEntry.name} (AFK=true, {SlotParameterName}={slotIndex})");
+                var created = false;
+
+                foreach (var entry in ctx.TargetScan.EntryTransitions)
+                {
+                    if (entry.IsFromAnyState) continue;
+                    if (entry.SourceState == null) continue;
+
+                    var t = entry.SourceState.AddTransition(newEntry);
+                    CopyTransitionSettings(entry.Transition, t);
+                    t.AddCondition(AnimatorConditionMode.Equals, slotIndex, SlotParameterName);
+                    AfkLog.Info($"Entry: {entry.SourceState.name} → {newEntry.name} ({SlotParameterName}={slotIndex})");
+                    created = true;
+                }
+
+                foreach (var entry in ctx.TargetScan.EntryTransitions)
+                {
+                    if (!entry.IsFromAnyState) continue;
+
+                    var t = rootSm.AddAnyStateTransition(newEntry);
+                    CopyTransitionSettings(entry.Transition, t);
+                    t.AddCondition(AnimatorConditionMode.Equals, slotIndex, SlotParameterName);
+                    AfkLog.Info($"Entry: AnyState → {newEntry.name} ({SlotParameterName}={slotIndex})");
+                    created = true;
+                }
+
+                if (!created)
+                    AfkLog.Warn($"No entry transitions created for slot {slotIndex}.");
             }
             else
             {
@@ -171,7 +191,7 @@ namespace Sebanne.AfkManager.Editor.Core
             }
         }
 
-        internal static void EnsureSlotParameter(AnimatorController controller)
+        internal static void EnsureSlotParameter(AnimatorController controller, int defaultValue = 0)
         {
             foreach (var p in controller.parameters)
             {
@@ -180,7 +200,17 @@ namespace Sebanne.AfkManager.Editor.Core
             }
 
             controller.AddParameter(SlotParameterName, AnimatorControllerParameterType.Int);
-            AfkLog.Info($"Added parameter: {SlotParameterName} (Int)");
+
+            var parameters = controller.parameters;
+            for (var i = 0; i < parameters.Length; i++)
+            {
+                if (parameters[i].name != SlotParameterName) continue;
+                parameters[i].defaultInt = defaultValue;
+                break;
+            }
+            controller.parameters = parameters;
+
+            AfkLog.Info($"Added parameter: {SlotParameterName} (Int, default={defaultValue})");
         }
 
         internal static AnimatorState CreateSharedBlendOut(AfkOperationContext ctx)
