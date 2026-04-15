@@ -237,6 +237,12 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 
 - Runtime ファイルの namespace は `Sebanne.AfkManager`、Editor ファイルの namespace は `Sebanne.AfkManager.Editor` に統一する（Core / Debug サブ namespace あり）
 
+### コード変更の原則
+- 変更した全ての行が、依頼内容に直接たどれること（判定基準）
+- 元からあった死にコードはこのプロジェクトでは報告だけして消さない
+- 依頼を成立させるための連鎖変更（Component→Editor→Plugin 等）は「直接関係する」に含む
+- 事前に plan で承認されたリファクタ・構造変更はこの原則の対象外
+
 ## 次フェーズ候補
 
 ### 2.0.0 コア
