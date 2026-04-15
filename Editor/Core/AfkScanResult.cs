@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEditor.Animations;
 
-namespace Sebanne.AfkChanger.Editor.Core
+namespace Sebanne.AfkManager.Editor.Core
 {
     internal sealed class AfkScanResult
     {

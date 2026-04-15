@@ -1,36 +1,45 @@
 ## Goal
 
-VRChat アバターの AFK アニメーションを非破壊で入れ替える NDMF プラグイン。
+VRChat アバターの AFK アニメーションを非破壊で管理する NDMF プラグイン。
 
-初心者でも簡単に AFK モーションを差し替えられることを目的とする。
+初心者でも簡単に AFK モーションの入れ替え・削除・追加ができることを目的とする。
 
 ## Current State
 
-version 1.0.2 公開完了（GitHub Release / VPM listing / VCC / BOOTH）。
-v1.0.0 初回リリース → v1.0.1 DestroyImmediate fix → v1.0.2 IEditorOnly 実装。
+2.0.0 開発中。ツール名変更: AFK Changer → AFK Manager。
+
+Step 1（土台）完了: namespace 変更（Sebanne.AfkChanger → Sebanne.AfkManager）、ファイルリネーム、Component フィールド刷新（付け外し型 UI のデータモデル）、asmdef に MA Version Defines 追加。Plugin は最小適応（actionSources[0] 読み出し + removeFxAfk）。
+Step 2（Inspector）完了: 付け外し型 UI 実装。Action セクション（ReorderableList でスロット一覧、スキャン結果表示、MA 必須判定 + Warning/Info）、FX セクション（スキャン結果 + 削除チェックボックス）。
+Step 3（Engine）完了: AfkStateReplacer + AfkFxProcessor → AfkOperationEngine に統合。AfkOperationContext で Action/FX の差異を吸収（NeedsBlendOut / NeedsBehaviours）。Delete（standalone）+ Replace（content 入れ替え）の 2 操作。Plugin を ProcessAction / ProcessFx に分離。
+Step 4（MenuGenerator + 2パス + Add）完了: AfkMenuGenerator 新規（MA Menu Item + Parameters 生成、#if HAS_MODULAR_AVATAR）。Engine に Add + AddSlotConditionToExistingEntries + EnsureSlotParameter 追加。Plugin を Generating + Transforming.AfterPlugin("MA") の 2 パス構成に移行。複数スロット対応（Delete→Add×N / AddSlotCondition+Add×N）。
+Step 5（GoGoLoco）完了: Inspector に GoGoLoco 検出 + Warning（MA Merge Animator の Controller 名に "GoLoco" を含むか）。ビルド時に多重ネスト SubSM 検出 → エラーログ + Action 処理スキップ。Scanner に HasNestedSubStateMachines 追加。
+
+v1.0.2 公開済み（GitHub Release / VPM listing / VCC / BOOTH）。
 BOOTH 商品ページ公開済み（説明文・タグ・zip・クレジット・サムネは後日）。
 
-FX レイヤー AFK ステート削除（Clean）機能を実装済み（未リリース。v1.1.0 単独リリースはせず v2.0.0 に吸収）。
-
-2.0.0 設計議論完了。設計ドキュメントは Notion に記録済み（AFK Manager 構想ページ）。
-Component/Inspector 詳細設計確定（付け外し型 UI）。Claude Code レビュー済み。
+設計ドキュメントは Notion に記録済み（AFK Manager 構想ページ）。
+Component/Inspector 詳細設計確定（付け外し型 UI）。
 技術検証 2 点クリア: NDMF 2パス構成（Generating + Transforming.AfterPlugin）/ AnyState transition conditions 追加。
-コード変更なし。
 
 ### 実装済み
 - AfkStateScanner: AFK ステートを BFS 走査 + content/skeleton 分類
   - BFS 停止条件: entrySourceStates（逆流防止）と isExit のみ
   - HasAfkFalseCondition は停止条件に使わない（出口チェーンを切らないため）
-- AfkStateReplacer: SubSM パターンと flat パターンの二系統
-  - 入口: AnyState は使わない。ターゲットの元の入口遷移を付け替え
-  - 出口: コンテンツ境界ベース（content 外への遷移を AFK BlendOut に付け替え）
-  - TrackingControl / PlayableLayerControl をツール側で自動付与（入口: Animation+weight=1、出口: Tracking+weight=0）
-  - AFK BlendOut ステートを生成し、default state への遷移を作成
-- AfkChangerPlugin: NDMF Generating フェーズ、AfterPlugin("nadena.dev.modular-avatar")
+- AfkOperationEngine: Delete + Replace + Add の 3 操作。AfkOperationContext で Action/FX 差異を吸収
+  - Delete: 全 AFK ステート削除（standalone。BlendOut なし）
+  - Replace: SubSM / flat パターンの content 入れ替え（skeleton 保持）
+  - Add: ソース content を並列追加（AnyState 入口 + AfkManagerSlot 条件で入口分岐）
+  - AddSlotConditionToExistingEntries: 既存 AFK 入口に AfkManagerSlot 条件を追加
+  - EnsureSlotParameter: AfkManagerSlot Int パラメータ追加
+  - 入口: AnyState は使わない（Replace）。Add では AnyState + AfkManagerSlot 条件
+  - 出口: コンテンツ境界ベース（NeedsBlendOut で制御。複数 Add では共有 BlendOut）
+  - TrackingControl / PlayableLayerControl 自動付与（NeedsBehaviours で制御）
+- AfkOperationContext: ForAction / ForFxLayer ファクトリ。NeedsBlendOut / NeedsBehaviours / EntryBlendDuration を保持
+- AfkMenuGenerator: MA Menu Item + Parameters をビルド時生成（#if HAS_MODULAR_AVATAR。Generating フェーズ）
+- AfkManagerPlugin: NDMF 2パス（Pass 1: Generating で MA 生成、Pass 2: Transforming.AfterPlugin("MA") で実操作）。ProcessAction / ProcessFx で操作を分離。複数スロット対応
 - ControllerDumper: Tools メニュー / Assets 右クリック / Hierarchy 右クリックの3箇所起動。毎回新規ファイル生成（dump_{name}_{timestamp}.txt）
-- AfkChangerEditor: Custom Editor。Avatar/Prefab ObjectField、スキャン結果表示、警告 HelpBox
+- AfkManagerEditor: Custom Editor。付け外し型 UI（Action セクション + FX セクション）。ReorderableList でスロット一覧、スロットごとスキャンキャッシュ、MA 必須判定
 - ActionControllerResolver: Descriptor → 指定レイヤー → AnimatorController 取得ロジック共通化（AnimLayerType パラメータ化済み）
-- AfkFxProcessor: FX レイヤーの AFK ステート削除（Clean）処理
 - AfkStateScanner.ScanFxLayers: FX コントローラーの全レイヤーを走査し、AFK ステートを持つレイヤーの結果をリストで返す
 
 ### 検証済みパターン
@@ -69,36 +78,37 @@ Component/Inspector 詳細設計確定（付け外し型 UI）。Claude Code レ
 - 削除後にレイヤーが空になってもレイヤーは残す
 - AFK パラメータも残す（Action 側で使うため）
 - Scanner の ScanStateMachine() を抽出し、ScanFxLayers() で全レイヤーを走査
-- AfkFxProcessor.Clean() で削除処理。Replacer のロジックを複製（import しない）
+- 削除処理は AfkOperationEngine.Delete() に統合（旧 AfkFxProcessor.Clean / AfkStateReplacer.RemoveAfkStatesFlat を統合）
 - FX Replace（入れ替え）は次フェーズ
 
 ## 入力
 
-- Action 入れ替え（MVP）: AnimatorController を入力。Controller 内の AFK パラメータ使用ステートを走査し、ビルド時にアバターの Action Controller 内の AFK ステートをまるごと入れ替える
+- Action: AfkSlot のリストで指定。各スロットは Avatar/Prefab または Controller 入力。removeActionAfk で元 AFK の削除制御
 
-- FX Clean: FX レイヤーの AFK パラメータ関連ステートを削除（選択制）。コンポーネントの FxMode で None / Clean を切り替え
+- FX: removeFxAfk で FX レイヤーの AFK パラメータ関連ステートを削除。「付ける」側は 2.1+ で Object Toggle 構想と合わせて設計
 
 - モード1（次フェーズ）: AnimationClip を入力。既存 AFK ステートの Motion を差し替え（構造は維持）
 
 ## アーキテクチャ
 
-- MonoBehaviour コンポーネント（アバタールートに設置）
+- MonoBehaviour コンポーネント（AfkManagerComponent。アバタールートに設置）
 
-- NDMF プラグイン（2パス: Pass 1 = Generating で MA コンポーネント生成、Pass 2 = Transforming.AfterPlugin("MA") で実操作。現行 1.0.x は Generating の AfterPlugin だが MA が Generating にパスを持たないため実質無効）
+- NDMF プラグイン（2パス構成。Pass 1 = Generating で MA コンポーネント生成、Pass 2 = Transforming.AfterPlugin("MA") で実操作）
 
 - 非破壊: ビルド時にクローン上で処理。元の Animator は変更しない
 
 ## ファイル構成
 
-- `Runtime/AfkChangerComponent.cs` — MonoBehaviour。Source Controller フィールド + AfkFxMode enum + FxMode フィールド
-- `Editor/AfkChangerPlugin.cs` — NDMF Plugin。Generating フェーズで AFK 入れ替え実行
-- `Editor/AfkChangerEditor.cs` — CustomEditor。Avatar/Prefab ObjectField、スキャン結果表示、警告 HelpBox
+- `Runtime/AfkManagerComponent.cs` — MonoBehaviour + AfkSlot + AfkSourceInputType。removeActionAfk / actionSources / removeFxAfk
+- `Editor/AfkManagerPlugin.cs` — NDMF Plugin。Generating フェーズで AFK 処理実行
+- `Editor/AfkManagerEditor.cs` — CustomEditor。付け外し型 UI（Action / FX セクション、ReorderableList、スキャンキャッシュ）
 - `Editor/Core/AfkStateScanner.cs` — BFS 走査 + content/skeleton 分類
-- `Editor/Core/AfkStateReplacer.cs` — SubSM / flat パターンの入れ替え処理
+- `Editor/Core/AfkOperationEngine.cs` — Delete / Replace / Add 操作 + SlotParameter 管理。旧 Replacer + FxProcessor 統合
 - `Editor/Core/AfkScanResult.cs` — スキャン結果データクラス
 - `Editor/Core/ActionControllerResolver.cs` — Descriptor → 指定レイヤー → AnimatorController 取得ロジック共通化（AnimLayerType パラメータ化）
-- `Editor/Core/AfkFxProcessor.cs` — FX レイヤーの AFK ステート削除（Clean）処理
-- `Editor/Core/AfkLog.cs` — ログユーティリティ（[AFK Changer] プレフィックス）
+- `Editor/Core/AfkOperationContext.cs` — 操作コンテキスト（ForAction / ForFxLayer ファクトリ）
+- `Editor/Core/AfkMenuGenerator.cs` — MA Menu Item + Parameters 生成（#if HAS_MODULAR_AVATAR）
+- `Editor/Core/AfkLog.cs` — ログユーティリティ（[AFK Manager] プレフィックス）
 - `Editor/Debug/ControllerDumper.cs` — AnimatorController 構造ダンプ（Tools / Assets / Hierarchy メニュー）
 
 ## AFK ステート構造の実態
@@ -141,7 +151,7 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
    - 入口ステートに TrackingControl + PlayableLayerControl を自動付与
    - AFK BlendOut ステートを生成し、content 外への出口遷移を BlendOut に付け替え
 
-5. FX Clean（FxMode == Clean の場合、Action 処理の後に実行）:
+5. FX Clean（removeFxAfk が true の場合、Action 処理の後に実行）:
    - アバターの FX Controller を取得（VRC Avatar Descriptor → Playable Layers → FX）
    - ScanFxLayers で全レイヤーを走査し、AFK ステートを持つレイヤーを特定
    - 各レイヤーごとに AFK ステート + 遷移を削除（遷移再接続なし）
@@ -198,12 +208,20 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 
 ## UI
 
-- アバタールートに付ける MonoBehaviour コンポーネント
-- Avatar / Prefab の ObjectField（ドラッグで Action Controller を自動取得）
-- Source Controller の ObjectField（直接指定も可能）
-- スキャン結果を miniLabel で表示（パターン名 + ステート数）
-- 警告は HelpBox（AFK 未検出、Avatar Descriptor なし等）
-- FX セクション（helpBox 枠）: FX モード Popup（なし / 削除）+ FX スキャン結果 miniLabel
+- アバタールートに付ける MonoBehaviour コンポーネント（AfkManagerComponent）
+- Action セクション（helpBox 枠）:
+  - 「現在の AFK」miniLabel（アバターの Action Controller をスキャンして表示）
+  - 「元の AFK を外す」チェックボックス（removeActionAfk）
+  - 「付ける AFK」ReorderableList（ドラッグ並べ替え対応）
+  - 各スロット: InputType Popup（Avatar/Prefab or Controller）+ ObjectField + スキャン結果 miniLabel
+  - MA 必須構成の時のみスロット名フィールド表示
+- FX セクション（helpBox 枠）:
+  - 「現在の FX AFK」miniLabel + 「元の FX AFK を外す」チェックボックス
+- 表示ルール:
+  - removeActionAfk ON + ソース 0 → Warning「棒立ち」
+  - MA 必須 + MA 未検出 → Warning「MA が必要です」
+  - MA 必須 + MA 検出 → Info「Expression Menu で切り替え」
+  - MA 必須判定: sourceCount >= 2 || (!removeAction && sourceCount >= 1)
 
 ## Current Blocker
 
@@ -217,7 +235,7 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 
 - commit / push は明示的な指示があるまで行わない
 
-- Runtime ファイルの namespace は `Sebanne.AfkChanger`、Editor ファイルの namespace は `Sebanne.AfkChanger.Editor` に統一する（Core / Debug サブ namespace あり）
+- Runtime ファイルの namespace は `Sebanne.AfkManager`、Editor ファイルの namespace は `Sebanne.AfkManager.Editor` に統一する（Core / Debug サブ namespace あり）
 
 ## 次フェーズ候補
 

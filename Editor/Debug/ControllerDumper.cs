@@ -2,12 +2,12 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Sebanne.AfkChanger.Editor.Core;
+using Sebanne.AfkManager.Editor.Core;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 
-namespace Sebanne.AfkChanger.Editor.Debug
+namespace Sebanne.AfkManager.Editor.Debug
 {
     internal static class ControllerDumper
     {
@@ -15,20 +15,20 @@ namespace Sebanne.AfkChanger.Editor.Debug
 
         // --- Tools menu (existing) ---
 
-        [MenuItem("Tools/AFK Changer/Dump Selected Controller")]
+        [MenuItem("Tools/AFK Manager/Dump Selected Controller")]
         private static void DumpSelected()
         {
             var obj = Selection.activeObject;
             if (obj == null || !(obj is AnimatorController controller))
             {
-                UnityEngine.Debug.LogWarning("[AFK Changer] Select an AnimatorController in the Project window.");
+                UnityEngine.Debug.LogWarning("[AFK Manager] Select an AnimatorController in the Project window.");
                 return;
             }
 
             DumpAndWrite(controller);
         }
 
-        [MenuItem("Tools/AFK Changer/Dump Selected Controller", true)]
+        [MenuItem("Tools/AFK Manager/Dump Selected Controller", true)]
         private static bool DumpSelectedValidate()
         {
             return Selection.activeObject is AnimatorController;
@@ -36,7 +36,7 @@ namespace Sebanne.AfkChanger.Editor.Debug
 
         // --- Assets context menu: AnimatorController ---
 
-        [MenuItem("Assets/AFK Changer/Dump Controller")]
+        [MenuItem("Assets/AFK Manager/Dump Controller")]
         private static void DumpControllerAsset()
         {
             var obj = Selection.activeObject;
@@ -44,7 +44,7 @@ namespace Sebanne.AfkChanger.Editor.Debug
                 DumpAndWrite(controller);
         }
 
-        [MenuItem("Assets/AFK Changer/Dump Controller", true)]
+        [MenuItem("Assets/AFK Manager/Dump Controller", true)]
         private static bool DumpControllerAssetValidate()
         {
             return Selection.activeObject is AnimatorController;
@@ -52,25 +52,25 @@ namespace Sebanne.AfkChanger.Editor.Debug
 
         // --- Assets context menu: Prefab / Hierarchy: GameObject with VRCAvatarDescriptor ---
 
-        [MenuItem("Assets/AFK Changer/Dump Action Controller")]
+        [MenuItem("Assets/AFK Manager/Dump Action Controller")]
         private static void DumpFromAsset()
         {
             DumpFromSelectedGameObject();
         }
 
-        [MenuItem("Assets/AFK Changer/Dump Action Controller", true)]
+        [MenuItem("Assets/AFK Manager/Dump Action Controller", true)]
         private static bool DumpFromAssetValidate()
         {
             return HasSelectedDescriptor();
         }
 
-        [MenuItem("GameObject/AFK Changer/Dump Action Controller", false, 49)]
+        [MenuItem("GameObject/AFK Manager/Dump Action Controller", false, 49)]
         private static void DumpFromHierarchy()
         {
             DumpFromSelectedGameObject();
         }
 
-        [MenuItem("GameObject/AFK Changer/Dump Action Controller", true)]
+        [MenuItem("GameObject/AFK Manager/Dump Action Controller", true)]
         private static bool DumpFromHierarchyValidate()
         {
             return HasSelectedDescriptor();
@@ -88,7 +88,7 @@ namespace Sebanne.AfkChanger.Editor.Debug
             var controller = ActionControllerResolver.TryResolve(obj, VRC.SDK3.Avatars.Components.VRCAvatarDescriptor.AnimLayerType.Action, out var error);
             if (controller == null)
             {
-                UnityEngine.Debug.LogWarning($"[AFK Changer] {error}");
+                UnityEngine.Debug.LogWarning($"[AFK Manager] {error}");
                 return;
             }
 
@@ -101,7 +101,7 @@ namespace Sebanne.AfkChanger.Editor.Debug
         {
             var content = BuildDump(controller);
             var path = WriteToFile(content, controller.name);
-            UnityEngine.Debug.Log($"[AFK Changer] Controller dump saved to {path}");
+            UnityEngine.Debug.Log($"[AFK Manager] Controller dump saved to {path}");
         }
 
         private static string BuildDump(AnimatorController controller)

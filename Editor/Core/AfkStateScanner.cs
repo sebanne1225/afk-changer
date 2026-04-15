@@ -2,11 +2,21 @@ using System.Collections.Generic;
 using UnityEditor.Animations;
 using UnityEngine;
 
-namespace Sebanne.AfkChanger.Editor.Core
+namespace Sebanne.AfkManager.Editor.Core
 {
     internal static class AfkStateScanner
     {
         private const string AfkParameterName = "AFK";
+
+        internal static bool HasNestedSubStateMachines(AnimatorStateMachine rootSm)
+        {
+            foreach (var csm in rootSm.stateMachines)
+            {
+                if (csm.stateMachine.stateMachines.Length > 0)
+                    return true;
+            }
+            return false;
+        }
 
         internal static AfkScanResult Scan(AnimatorController controller)
         {

@@ -5,13 +5,30 @@ using UnityEngine;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDKBase;
 
-namespace Sebanne.AfkChanger.Editor.Core
+namespace Sebanne.AfkManager.Editor.Core
 {
-    internal static class AfkStateReplacer
+    internal static class AfkOperationEngine
     {
+        internal const string SlotParameterName = "AfkManagerSlot";
+
+        // =====================================================================
+        // Public API
+        // =====================================================================
+
+        internal static void Delete(AfkOperationContext ctx)
+        {
+            if (!ctx.TargetScan.HasAfkStates) return;
+
+            if (ctx.TargetScan.HasSubStateMachineContent)
+                RemoveContentSubStateMachines(ctx.RootStateMachine, ctx.TargetScan);
+
+            RemoveAfkStates(ctx.RootStateMachine, ctx.TargetScan);
+
+            AfkLog.Info($"Deleted {ctx.TargetScan.AfkStates.Count} AFK state(s).");
+        }
+
         internal static bool Replace(
-            AnimatorController targetController,
-            AfkScanResult targetScan,
+            AfkOperationContext ctx,
             AfkScanResult sourceScan,
             AnimatorController sourceController)
         {
@@ -27,58 +44,190 @@ namespace Sebanne.AfkChanger.Editor.Core
                 return false;
             }
 
-            if (targetController.layers.Length == 0)
+            if (ctx.Controller.layers.Length == 0)
             {
                 AfkLog.Error("Target controller has no layers.");
                 return false;
             }
 
-            var targetSm = targetController.layers[0].stateMachine;
+            if (ctx.TargetScan.HasSubStateMachineContent && sourceScan.HasSubStateMachineContent)
+                return ReplaceSubSm(ctx, sourceScan, sourceController);
 
-            if (targetScan.HasSubStateMachineContent && sourceScan.HasSubStateMachineContent)
-                return ReplaceSubSm(targetController, targetSm, targetScan, sourceScan, sourceController);
+            return ReplaceFlat(ctx, sourceScan, sourceController);
+        }
 
-            // Flat pattern fallback
-            return ReplaceFlat(targetController, targetSm, targetScan, sourceScan, sourceController);
+        internal static bool Add(
+            AfkOperationContext ctx,
+            AfkScanResult sourceScan,
+            AnimatorController sourceController,
+            int slotIndex,
+            AnimatorState sharedBlendOut)
+        {
+            if (!sourceScan.HasAfkStates)
+            {
+                AfkLog.Error("Source controller has no AFK states.");
+                return false;
+            }
+
+            if (sourceScan.ContentStates.Count == 0)
+            {
+                AfkLog.Error("Source controller has no AFK content states.");
+                return false;
+            }
+
+            var rootSm = ctx.RootStateMachine;
+
+            // Step 1: Copy source content states
+            var sourceSm = sourceController.layers[0].stateMachine;
+            var mapping = CopyContentStates(rootSm, sourceScan, sourceSm);
+
+            // Step 2: Copy internal transitions
+            CopyInternalTransitions(sourceScan.ContentStates, mapping);
+
+            // Step 3: Create AnyState entry with slot conditions
+            if (sourceScan.EntryState != null && mapping.ContainsKey(sourceScan.EntryState))
+            {
+                var newEntry = mapping[sourceScan.EntryState];
+                var t = rootSm.AddAnyStateTransition(newEntry);
+                t.hasExitTime = false;
+                t.duration = 0f;
+                t.hasFixedDuration = true;
+                t.canTransitionToSelf = false;
+                t.AddCondition(AnimatorConditionMode.If, 0f, "AFK");
+                t.AddCondition(AnimatorConditionMode.Equals, slotIndex, SlotParameterName);
+                AfkLog.Info($"Entry: AnyState → {newEntry.name} (AFK=true, {SlotParameterName}={slotIndex})");
+            }
+            else
+            {
+                AfkLog.Warn("Could not determine source entry state for Add.");
+            }
+
+            // Step 4: Reconnect exits to shared BlendOut
+            if (sharedBlendOut != null)
+                ReconnectExitFlat(sourceScan, mapping, sharedBlendOut);
+
+            // Step 5: Attach entry behaviours
+            if (ctx.NeedsBehaviours)
+                AttachEntryBehaviours(sourceScan, mapping, ctx.EntryBlendDuration);
+
+            // Step 6: Copy missing parameters
+            CopyMissingParameters(ctx.Controller, sourceController);
+
+            var entryName = sourceScan.EntryState != null && mapping.ContainsKey(sourceScan.EntryState)
+                ? mapping[sourceScan.EntryState].name
+                : "(unknown)";
+            AfkLog.Info($"Added AFK slot {slotIndex}. Copied {mapping.Count} state(s). Entry: {entryName}");
+
+            return true;
+        }
+
+        internal static void AddSlotConditionToExistingEntries(AfkOperationContext ctx, int slotValue)
+        {
+            var rootSm = ctx.RootStateMachine;
+
+            // Recreate AnyState entries with added slot condition
+            foreach (var entry in ctx.TargetScan.EntryTransitions)
+            {
+                if (!entry.IsFromAnyState) continue;
+                if (entry.DestinationState == null) continue;
+
+                var dest = entry.DestinationState;
+                var oldTransition = entry.Transition;
+
+                // Remove old AnyState transition
+                var remaining = rootSm.anyStateTransitions
+                    .Where(t => t != oldTransition)
+                    .ToArray();
+                rootSm.anyStateTransitions = remaining;
+
+                // Recreate with added slot condition
+                var newT = rootSm.AddAnyStateTransition(dest);
+                CopyTransitionSettings(oldTransition, newT);
+                newT.AddCondition(AnimatorConditionMode.Equals, slotValue, SlotParameterName);
+                AfkLog.Info($"Tagged AnyState → {dest.name} with {SlotParameterName}={slotValue}");
+            }
+
+            // Recreate per-state entries with added slot condition
+            foreach (var entry in ctx.TargetScan.EntryTransitions)
+            {
+                if (entry.IsFromAnyState) continue;
+                if (entry.SourceState == null || entry.DestinationState == null) continue;
+
+                var source = entry.SourceState;
+                var dest = entry.DestinationState;
+                var oldTransition = entry.Transition;
+
+                // Remove old transition
+                var remaining = source.transitions
+                    .Where(t => t != oldTransition)
+                    .ToArray();
+                source.transitions = remaining;
+
+                // Recreate with added slot condition
+                var newT = source.AddTransition(dest);
+                CopyTransitionSettings(oldTransition, newT);
+                newT.AddCondition(AnimatorConditionMode.Equals, slotValue, SlotParameterName);
+                AfkLog.Info($"Tagged {source.name} → {dest.name} with {SlotParameterName}={slotValue}");
+            }
+        }
+
+        internal static void EnsureSlotParameter(AnimatorController controller)
+        {
+            foreach (var p in controller.parameters)
+            {
+                if (p.name == SlotParameterName && p.type == AnimatorControllerParameterType.Int)
+                    return;
+            }
+
+            controller.AddParameter(SlotParameterName, AnimatorControllerParameterType.Int);
+            AfkLog.Info($"Added parameter: {SlotParameterName} (Int)");
+        }
+
+        internal static AnimatorState CreateSharedBlendOut(AfkOperationContext ctx)
+        {
+            return CreateBlendOutState(ctx.RootStateMachine, ctx.RootStateMachine.defaultState);
         }
 
         // =====================================================================
-        // SubStateMachine pattern: replace content only, preserve skeleton
+        // Replace: SubStateMachine pattern
         // =====================================================================
 
         private static bool ReplaceSubSm(
-            AnimatorController targetController,
-            AnimatorStateMachine targetSm,
-            AfkScanResult targetScan,
+            AfkOperationContext ctx,
             AfkScanResult sourceScan,
             AnimatorController sourceController)
         {
-            // Step 1: Remove content SubStateMachines
-            RemoveContentSubStateMachines(targetSm, targetScan);
+            var rootSm = ctx.RootStateMachine;
+
+            // Step 1: Remove content SubStateMachines (skeleton preserved)
+            RemoveContentSubStateMachines(rootSm, ctx.TargetScan);
 
             // Step 2: Clean up skeleton states' dangling transitions
-            CleanupSkeletonTransitions(targetSm, targetScan);
+            CleanupSkeletonTransitions(rootSm, ctx.TargetScan);
 
             // Step 3: Copy source content states into target root SM
             var sourceSm = sourceController.layers[0].stateMachine;
-            var mapping = CopyContentStates(targetSm, sourceScan, sourceSm);
+            var mapping = CopyContentStates(rootSm, sourceScan, sourceSm);
 
             // Step 4: Copy internal transitions between content states
             CopyInternalTransitions(sourceScan.ContentStates, mapping);
 
             // Step 5: Reconnect skeleton → content entry
-            ReconnectSubSmEntry(targetScan, sourceScan, mapping);
+            ReconnectSubSmEntry(ctx.TargetScan, sourceScan, mapping);
 
-            // Step 6: Attach entry behaviours (TrackingControl + PlayableLayerControl)
-            var entryBlendDuration = GetExistingEntryBlendDuration(targetScan);
-            AttachEntryBehaviours(sourceScan, mapping, entryBlendDuration);
+            // Step 6: Attach entry behaviours
+            if (ctx.NeedsBehaviours)
+                AttachEntryBehaviours(sourceScan, mapping, ctx.EntryBlendDuration);
 
-            // Step 7: Create BlendOut state and reconnect exits through it
-            var blendOutState = CreateBlendOutState(targetSm, targetSm.defaultState);
-            ReconnectSubSmExitToBlendOut(sourceScan, mapping, blendOutState);
+            // Step 7: Create BlendOut state and reconnect exits
+            if (ctx.NeedsBlendOut)
+            {
+                var blendOutState = CreateBlendOutState(rootSm, rootSm.defaultState);
+                ReconnectSubSmExitToBlendOut(sourceScan, mapping, blendOutState);
+            }
 
             // Step 8: Add missing parameters
-            CopyMissingParameters(targetController, sourceController);
+            CopyMissingParameters(ctx.Controller, sourceController);
 
             var entryName = sourceScan.EntryState != null && mapping.ContainsKey(sourceScan.EntryState)
                 ? mapping[sourceScan.EntryState].name
@@ -88,23 +237,73 @@ namespace Sebanne.AfkChanger.Editor.Core
             return true;
         }
 
-        private static void RemoveContentSubStateMachines(
-            AnimatorStateMachine rootSm,
-            AfkScanResult targetScan)
+        // =====================================================================
+        // Replace: Flat pattern
+        // =====================================================================
+
+        private static bool ReplaceFlat(
+            AfkOperationContext ctx,
+            AfkScanResult sourceScan,
+            AnimatorController sourceController)
         {
-            foreach (var subSm in targetScan.ContentSubStateMachines)
+            var rootSm = ctx.RootStateMachine;
+
+            // Step 1: Remove existing AFK states
+            RemoveAfkStates(rootSm, ctx.TargetScan);
+
+            // Step 2: Copy source content states
+            var sourceSm = sourceController.layers[0].stateMachine;
+            var mapping = CopyContentStates(rootSm, sourceScan, sourceSm);
+
+            // Step 3: Copy internal transitions
+            CopyInternalTransitions(sourceScan.ContentStates, mapping);
+
+            // Step 4: Reconnect entry transitions
+            ReconnectEntryFlat(rootSm, ctx.TargetScan, sourceScan, mapping);
+
+            // Step 5: Create BlendOut and reconnect exits
+            if (ctx.NeedsBlendOut)
             {
-                AfkLog.Info($"Removing AFK SubStateMachine: {subSm.name}");
-                rootSm.RemoveStateMachine(subSm);
+                var blendOutState = CreateBlendOutState(rootSm, rootSm.defaultState);
+                ReconnectExitFlat(sourceScan, mapping, blendOutState);
             }
 
-            // Clean up AnyState transitions that targeted content states or removed SubSMs
+            // Step 6: Attach entry behaviours
+            if (ctx.NeedsBehaviours)
+                AttachEntryBehaviours(sourceScan, mapping, ctx.EntryBlendDuration);
+
+            // Step 7: Add missing parameters
+            CopyMissingParameters(ctx.Controller, sourceController);
+
+            var entryName = sourceScan.EntryState != null && mapping.ContainsKey(sourceScan.EntryState)
+                ? mapping[sourceScan.EntryState].name
+                : "(unknown)";
+            AfkLog.Info($"Replaced AFK states (flat). Copied {mapping.Count} state(s). Entry: {entryName}");
+
+            return true;
+        }
+
+        // =====================================================================
+        // Delete primitives
+        // =====================================================================
+
+        private static void RemoveContentSubStateMachines(
+            AnimatorStateMachine rootSm,
+            AfkScanResult scan)
+        {
+            foreach (var subSm in scan.ContentSubStateMachines)
+            {
+                AfkLog.Info($"Removing AFK SubStateMachine: {subSm.name}");
+                rootSm.stateMachines = rootSm.stateMachines
+                    .Where(s => s.stateMachine != subSm).ToArray();
+            }
+
             var filtered = rootSm.anyStateTransitions
                 .Where(t =>
                 {
-                    if (t.destinationState != null && targetScan.ContentStates.Contains(t.destinationState))
+                    if (t.destinationState != null && scan.ContentStates.Contains(t.destinationState))
                         return false;
-                    if (t.destinationStateMachine != null && targetScan.ContentSubStateMachines.Contains(t.destinationStateMachine))
+                    if (t.destinationStateMachine != null && scan.ContentSubStateMachines.Contains(t.destinationStateMachine))
                         return false;
                     return true;
                 })
@@ -115,15 +314,14 @@ namespace Sebanne.AfkChanger.Editor.Core
 
         private static void CleanupSkeletonTransitions(
             AnimatorStateMachine rootSm,
-            AfkScanResult targetScan)
+            AfkScanResult scan)
         {
-            // Remove only transitions from skeleton states to content states
             foreach (var cs in rootSm.states)
             {
                 var hasContentTransition = false;
                 foreach (var t in cs.state.transitions)
                 {
-                    if (t.destinationState != null && targetScan.ContentStates.Contains(t.destinationState))
+                    if (t.destinationState != null && scan.ContentStates.Contains(t.destinationState))
                     {
                         hasContentTransition = true;
                         break;
@@ -133,18 +331,64 @@ namespace Sebanne.AfkChanger.Editor.Core
                 if (!hasContentTransition) continue;
 
                 var filtered = cs.state.transitions
-                    .Where(t => t.destinationState == null || !targetScan.ContentStates.Contains(t.destinationState))
+                    .Where(t => t.destinationState == null || !scan.ContentStates.Contains(t.destinationState))
                     .ToArray();
                 cs.state.transitions = filtered;
             }
         }
+
+        private static void RemoveAfkStates(AnimatorStateMachine rootSm, AfkScanResult scan)
+        {
+            if (scan == null || !scan.HasAfkStates)
+                return;
+
+            var allSms = new List<AnimatorStateMachine>();
+            CollectAllStateMachines(rootSm, allSms);
+
+            // Remove AnyState transitions targeting AFK states
+            foreach (var sm in allSms)
+            {
+                var filtered = sm.anyStateTransitions
+                    .Where(t => t.destinationState == null || !scan.AfkStates.Contains(t.destinationState))
+                    .ToArray();
+                if (filtered.Length != sm.anyStateTransitions.Length)
+                    sm.anyStateTransitions = filtered;
+            }
+
+            // Remove per-state transitions targeting AFK states
+            foreach (var sm in allSms)
+            {
+                foreach (var cs in sm.states)
+                {
+                    if (scan.AfkStates.Contains(cs.state)) continue;
+
+                    var filtered = cs.state.transitions
+                        .Where(t => t.destinationState == null || !scan.AfkStates.Contains(t.destinationState))
+                        .ToArray();
+                    if (filtered.Length != cs.state.transitions.Length)
+                        cs.state.transitions = filtered;
+                }
+            }
+
+            // Remove AFK states themselves (direct array manipulation to avoid Undo errors on NDMF clones)
+            foreach (var afkState in scan.AfkStates)
+            {
+                if (scan.StateOwnership.TryGetValue(afkState, out var parentSm))
+                    parentSm.states = parentSm.states.Where(s => s.state != afkState).ToArray();
+                else
+                    rootSm.states = rootSm.states.Where(s => s.state != afkState).ToArray();
+            }
+        }
+
+        // =====================================================================
+        // Reconnect primitives
+        // =====================================================================
 
         private static void ReconnectSubSmEntry(
             AfkScanResult targetScan,
             AfkScanResult sourceScan,
             Dictionary<AnimatorState, AnimatorState> mapping)
         {
-            // Source's skeleton→content transitions define the entry pattern
             foreach (var entry in sourceScan.SkeletonToContentTransitions)
             {
                 if (entry.DestinationState == null) continue;
@@ -152,8 +396,6 @@ namespace Sebanne.AfkChanger.Editor.Core
 
                 var newDest = mapping[entry.DestinationState];
 
-                // Find the corresponding skeleton state in the TARGET
-                // by matching name with the source's skeleton state
                 AnimatorState targetSkeletonState = null;
                 foreach (var targetEntry in targetScan.SkeletonToContentTransitions)
                 {
@@ -182,7 +424,6 @@ namespace Sebanne.AfkChanger.Editor.Core
             Dictionary<AnimatorState, AnimatorState> mapping,
             AnimatorState blendOutState)
         {
-            // Find real exits: content state transitions to non-content destinations
             foreach (var srcState in sourceScan.ContentStates)
             {
                 if (!mapping.ContainsKey(srcState)) continue;
@@ -201,89 +442,10 @@ namespace Sebanne.AfkChanger.Editor.Core
                     if (t.destinationState == null) continue;
                     if (sourceScan.ContentStates.Contains(t.destinationState)) continue;
 
-                    // Destination is outside content → real exit
                     var newExit = newSource.AddTransition(blendOutState);
                     CopyTransitionSettings(t, newExit);
                     AfkLog.Info($"Exit: {newSource.name} → {blendOutState.name}");
                 }
-            }
-        }
-
-        // =====================================================================
-        // Flat pattern: replace all AFK states (original behavior)
-        // =====================================================================
-
-        private static bool ReplaceFlat(
-            AnimatorController targetController,
-            AnimatorStateMachine targetSm,
-            AfkScanResult targetScan,
-            AfkScanResult sourceScan,
-            AnimatorController sourceController)
-        {
-            var entryBlendDuration = GetExistingEntryBlendDuration(targetScan);
-
-            RemoveAfkStatesFlat(targetSm, targetScan);
-
-            var sourceSm = sourceController.layers[0].stateMachine;
-            var mapping = CopyContentStates(targetSm, sourceScan, sourceSm);
-
-            CopyInternalTransitions(sourceScan.ContentStates, mapping);
-            ReconnectEntryFlat(targetSm, targetScan, sourceScan, mapping);
-
-            // Create BlendOut state and reconnect exits through it
-            var blendOutState = CreateBlendOutState(targetSm, targetSm.defaultState);
-            ReconnectExitFlat(sourceScan, mapping, blendOutState);
-
-            // Attach entry behaviours (TrackingControl + PlayableLayerControl)
-            AttachEntryBehaviours(sourceScan, mapping, entryBlendDuration);
-
-            CopyMissingParameters(targetController, sourceController);
-
-            var entryName = sourceScan.EntryState != null && mapping.ContainsKey(sourceScan.EntryState)
-                ? mapping[sourceScan.EntryState].name
-                : "(unknown)";
-            AfkLog.Info($"Replaced AFK states (flat). Copied {mapping.Count} state(s). Entry: {entryName}");
-
-            return true;
-        }
-
-        private static void RemoveAfkStatesFlat(AnimatorStateMachine rootSm, AfkScanResult targetScan)
-        {
-            if (targetScan == null || !targetScan.HasAfkStates)
-                return;
-
-            var allSms = new List<AnimatorStateMachine>();
-            CollectAllStateMachines(rootSm, allSms);
-
-            foreach (var sm in allSms)
-            {
-                var filtered = sm.anyStateTransitions
-                    .Where(t => t.destinationState == null || !targetScan.AfkStates.Contains(t.destinationState))
-                    .ToArray();
-                if (filtered.Length != sm.anyStateTransitions.Length)
-                    sm.anyStateTransitions = filtered;
-            }
-
-            foreach (var sm in allSms)
-            {
-                foreach (var cs in sm.states)
-                {
-                    if (targetScan.AfkStates.Contains(cs.state)) continue;
-
-                    var filtered = cs.state.transitions
-                        .Where(t => t.destinationState == null || !targetScan.AfkStates.Contains(t.destinationState))
-                        .ToArray();
-                    if (filtered.Length != cs.state.transitions.Length)
-                        cs.state.transitions = filtered;
-                }
-            }
-
-            foreach (var afkState in targetScan.AfkStates)
-            {
-                if (targetScan.StateOwnership.TryGetValue(afkState, out var parentSm))
-                    parentSm.RemoveState(afkState);
-                else
-                    rootSm.RemoveState(afkState);
             }
         }
 
@@ -302,18 +464,15 @@ namespace Sebanne.AfkChanger.Editor.Core
             var newEntry = mapping[sourceScan.EntryState];
             var created = false;
 
-            // Re-create target's original per-state entry transitions, retargeted to new entry
             foreach (var entry in targetScan.EntryTransitions)
             {
-                if (entry.SourceState == null) continue; // AnyState handled below
-                // SourceState (e.g. WaitForActionOrAFK) still exists — only AFK states were removed
+                if (entry.SourceState == null) continue;
                 var t = entry.SourceState.AddTransition(newEntry);
                 CopyTransitionSettings(entry.Transition, t);
                 AfkLog.Info($"Entry: {entry.SourceState.name} → {newEntry.name}");
                 created = true;
             }
 
-            // Re-create target's original AnyState entry transitions, retargeted to new entry
             foreach (var entry in targetScan.EntryTransitions)
             {
                 if (!entry.IsFromAnyState) continue;
@@ -325,7 +484,6 @@ namespace Sebanne.AfkChanger.Editor.Core
 
             if (!created)
             {
-                // Last resort: no target entries found (target had no AFK states)
                 var fallback = targetSm.AddAnyStateTransition(newEntry);
                 fallback.hasExitTime = false;
                 fallback.duration = 0f;
@@ -347,7 +505,6 @@ namespace Sebanne.AfkChanger.Editor.Core
                 return;
             }
 
-            // Find real exits: content state transitions to non-content destinations
             foreach (var srcState in sourceScan.ContentStates)
             {
                 if (!mapping.ContainsKey(srcState)) continue;
@@ -366,7 +523,6 @@ namespace Sebanne.AfkChanger.Editor.Core
                     if (t.destinationState == null) continue;
                     if (sourceScan.ContentStates.Contains(t.destinationState)) continue;
 
-                    // Destination is outside content → real exit
                     var newExit = newSource.AddTransition(blendOutState);
                     CopyTransitionSettings(t, newExit);
                     AfkLog.Info($"Exit: {newSource.name} → {blendOutState.name}");
@@ -375,7 +531,7 @@ namespace Sebanne.AfkChanger.Editor.Core
         }
 
         // =====================================================================
-        // Behaviour attachment helpers
+        // Behaviour primitives
         // =====================================================================
 
         private static void AttachEntryBehaviours(
@@ -391,7 +547,6 @@ namespace Sebanne.AfkChanger.Editor.Core
 
             var entryState = mapping[sourceScan.EntryState];
 
-            // Skip if the state already has these behaviours (source might have them)
             if (HasBehaviour<VRCPlayableLayerControl>(entryState) &&
                 HasBehaviour<VRCAnimatorTrackingControl>(entryState))
             {
@@ -439,13 +594,11 @@ namespace Sebanne.AfkChanger.Editor.Core
             blendOut.motion = defaultState != null ? defaultState.motion : null;
             blendOut.writeDefaultValues = true;
 
-            // PlayableLayerControl: weight → 0
             var plc = ScriptableObject.CreateInstance<VRCPlayableLayerControl>();
             plc.layer = VRC_PlayableLayerControl.BlendableLayer.Action;
             plc.goalWeight = 0f;
             plc.blendDuration = 0.5f;
 
-            // TrackingControl: all → Tracking
             var tc = ScriptableObject.CreateInstance<VRCAnimatorTrackingControl>();
             tc.trackingHead = VRC_AnimatorTrackingControl.TrackingType.Tracking;
             tc.trackingLeftHand = VRC_AnimatorTrackingControl.TrackingType.Tracking;
@@ -460,7 +613,6 @@ namespace Sebanne.AfkChanger.Editor.Core
 
             blendOut.behaviours = new StateMachineBehaviour[] { plc, tc };
 
-            // Transition to default state (wait for blend to finish)
             if (defaultState != null)
             {
                 var t = blendOut.AddTransition(defaultState);
@@ -483,20 +635,6 @@ namespace Sebanne.AfkChanger.Editor.Core
             return blendOut;
         }
 
-        private static float GetExistingEntryBlendDuration(AfkScanResult targetScan)
-        {
-            if (targetScan == null || targetScan.EntryState == null)
-                return 1f;
-
-            foreach (var b in targetScan.EntryState.behaviours)
-            {
-                if (b is VRCPlayableLayerControl plc)
-                    return plc.blendDuration;
-            }
-
-            return 1f;
-        }
-
         private static bool HasBehaviour<T>(AnimatorState state) where T : StateMachineBehaviour
         {
             foreach (var b in state.behaviours)
@@ -507,7 +645,7 @@ namespace Sebanne.AfkChanger.Editor.Core
         }
 
         // =====================================================================
-        // Shared helpers
+        // Copy primitives
         // =====================================================================
 
         private static Dictionary<AnimatorState, AnimatorState> CopyContentStates(
@@ -622,6 +760,10 @@ namespace Sebanne.AfkChanger.Editor.Core
             foreach (var c in source.conditions)
                 dest.AddCondition(c.mode, c.threshold, c.parameter);
         }
+
+        // =====================================================================
+        // Helpers
+        // =====================================================================
 
         private static Vector3 CalculatePositionOffset(AnimatorStateMachine sm)
         {

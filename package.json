@@ -1,9 +1,9 @@
 {
-  "name": "com.sebanne.afk-changer",
-  "displayName": "AFK Changer",
+  "name": "com.sebanne.afk-manager",
+  "displayName": "AFK Manager",
   "version": "1.0.2",
   "unity": "2022.3",
-  "description": "VRChat アバターの AFK アニメーションを非破壊で入れ替える NDMF プラグインです。",
+  "description": "VRChat アバターの AFK アニメーションを非破壊で管理する NDMF プラグインです。",
   "documentationUrl": "https://github.com/sebanne1225/afk-changer/blob/main/README.md",
   "changelogUrl": "https://github.com/sebanne1225/afk-changer/blob/main/CHANGELOG.md",
   "licensesUrl": "https://github.com/sebanne1225/afk-changer/blob/main/LICENSE",

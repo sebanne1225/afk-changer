@@ -3,7 +3,7 @@ using UnityEditor.Animations;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
 
-namespace Sebanne.AfkChanger.Editor.Core
+namespace Sebanne.AfkManager.Editor.Core
 {
     internal static class ActionControllerResolver
     {

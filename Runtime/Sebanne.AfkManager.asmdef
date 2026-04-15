@@ -1,22 +1,15 @@
 {
-  "name": "Sebanne.AfkChanger.Editor",
+  "name": "Sebanne.AfkManager",
   "references": [
-    "Sebanne.AfkChanger",
-    "nadena.dev.ndmf",
-    "VRC.SDK3A",
-    "VRC.SDK3A.Editor"
+    "VRC.SDK3A"
   ],
-  "includePlatforms": [
-    "Editor"
-  ],
+  "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
   "overrideReferences": false,
   "precompiledReferences": [],
   "autoReferenced": true,
-  "defineConstraints": [
-    "UNITY_EDITOR"
-  ],
+  "defineConstraints": [],
   "versionDefines": [],
   "noEngineReferences": false
 }
