@@ -9,7 +9,8 @@ VRChat アバターの AFK アニメーションを非破壊で管理する NDMF
 2.0.0 コア実装完了（Step 1-5 + バグ修正 2 件 + 追加機能 6 件 + クローズアウト調整 5 件すべて完了）。ツール名変更: AFK Changer → AFK Manager。
 UI モデル転換 段階 1（データ層 + ビルド時処理層）完了。`originalAfkOrder` + effectiveSlots 前処理層 + ProcessAction effectiveSlots ベース再設計 + 1-based スロット値スキーム。
 UI モデル転換 段階 2（Inspector UI 刷新）完了。単一 ReorderableList 型 UI（VirtualRow モデル + dispatch 型描画。元 AFK 行 + 追加スロット行を同一リストに統合）、「元の AFK を含める」Toggle 常時表示、元 AFK 行の 2 行レイアウト（固定ラベル「元の AFK」+ スキャン結果 miniLabel + メニュー名 PropertyField）、★ バッジ（effectiveSlotCount >= 2 の先頭行）、P3 空時ピッカー（「アバター一覧から選ぶ ▼」+ サブテキスト）、Drop Area 統合（ReorderableList 全体を D&D 受付 + ホバー時に薄青オーバーレイ）、fallback hint miniLabel 文言に ★ 付加。
-残り: tag 2.0.0 作成 → GitHub Release → VPM listing 反映確認 → VCC 確認 → BOOTH zip + 商品ページ更新。Step 2a/2b docs 更新 + W1 修正 + sync-check + sebanne-listing 新名登録 完了。
+2.0.0 公開完了: tag 2.0.0 / GitHub Release / VPM listing 反映 / VCC 実機動作確認 / BOOTH 更新（タイトル / 説明文 / タグ / zip）。
+closeout 後に BOOTH_PACKAGE 文言を購入者向けに改善（commit `1f48c38`）。
 
 Step 1（土台）完了: namespace 変更（Sebanne.AfkChanger → Sebanne.AfkManager）、ファイルリネーム、Component フィールド刷新（付け外し型 UI のデータモデル）、asmdef に MA Version Defines 追加。Plugin は最小適応（actionSources[0] 読み出し + removeFxAfk）。
 Step 2（Inspector）完了: 付け外し型 UI 実装。Action セクション（ReorderableList でスロット一覧、スキャン結果表示、MA 必須判定 + Warning/Info）、FX セクション（スキャン結果 + 削除チェックボックス）。
@@ -35,9 +36,6 @@ Step 5（GoGoLoco）完了: Inspector に GoGoLoco 検出 + Warning（MA Merge A
 - defaultSlotIndex 削除（「並び替えで先頭 = デフォルト = ★ スロット」に一本化。UI とデータ構造を単純化）
 - Inspector ★ バッジ + miniLabel 説明文（removeActionAfk=ON + sources>=2 時のみ。先頭スロットが fallback であることを視覚化）
 - package.json name 戻し（com.sebanne.afk-changer 維持）+ displayName AFK Manager + version 2.0.0 + Plugin QualifiedName 修正
-
-v1.0.2 公開済み（GitHub Release / VPM listing / VCC / BOOTH）。
-BOOTH 商品ページ公開済み（説明文・タグ・zip・クレジット・サムネは後日）。
 
 設計ドキュメントは Notion に記録済み（AFK Manager 構想ページ）。
 Component/Inspector 詳細設計確定（付け外し型 UI）。
@@ -311,4 +309,4 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 
 ## 次フェーズ候補
 
-Notion 次フェーズ候補 DB（リポ=AFK Changer）を参照。
+Notion 次フェーズ候補 DB（リポ=AFK Manager）を参照。
