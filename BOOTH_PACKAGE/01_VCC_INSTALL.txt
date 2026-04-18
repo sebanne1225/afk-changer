@@ -10,7 +10,7 @@ VCC / VPM から導入してください。
 2. package 一覧から
    AFK Manager
    を追加します
-3. Unity を開き、依存 package が解決されていることを確認します
+3. Unity を開き、Packages フォルダに AFK Manager が入っていれば導入完了です
 
 repo:
 https://github.com/sebanne1225/afk-manager

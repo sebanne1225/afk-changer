@@ -9,7 +9,7 @@ version: 2.0.0
 - このツールは非破壊で動作し、元のアバターや Animator には直接変更を加えません
 - NDMF のビルド時にクローン上で処理されるため、元データはそのまま残ります
 - コンポーネントを外すだけで元の AFK に戻せます
-- Modular Avatar は複数スロットで Expression Menu 切り替えを使う場合に必須、単一スロット時は optional です
+- Modular Avatar は複数スロットで Expression Menu 切り替えを使う場合に必須、単一スロットで使う場合は必須ではありません
 
 最初にやること:
 1. GitHub repo の README を確認してください
