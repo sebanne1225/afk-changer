@@ -6,13 +6,34 @@ VRChat アバターの AFK アニメーションを非破壊で管理する NDMF
 
 ## Current State
 
-2.0.0 開発中。ツール名変更: AFK Changer → AFK Manager。
+2.0.0 コア実装完了（Step 1-5 + バグ修正 2 件 + 追加機能 6 件 + クローズアウト調整 5 件すべて完了）。ツール名変更: AFK Changer → AFK Manager。
+UI モデル転換 段階 1（データ層 + ビルド時処理層）完了。`originalAfkOrder` + effectiveSlots 前処理層 + ProcessAction effectiveSlots ベース再設計 + 1-based スロット値スキーム。Inspector は最小適応（チェックボックスは int-backed Toggle で旧挙動を維持）。
+残り: 段階 2（Inspector UI 刷新: 単一リスト並び替え型、元 AFK 行特殊描画、★ バッジ配置変更等）/ Step 6（local dir リネーム / CLAUDE.md 以外のドキュメント更新（README / TOOL_INFO / CHANGELOG / BOOTH_PACKAGE）/ sync-check → release → listing → BOOTH）。
 
 Step 1（土台）完了: namespace 変更（Sebanne.AfkChanger → Sebanne.AfkManager）、ファイルリネーム、Component フィールド刷新（付け外し型 UI のデータモデル）、asmdef に MA Version Defines 追加。Plugin は最小適応（actionSources[0] 読み出し + removeFxAfk）。
 Step 2（Inspector）完了: 付け外し型 UI 実装。Action セクション（ReorderableList でスロット一覧、スキャン結果表示、MA 必須判定 + Warning/Info）、FX セクション（スキャン結果 + 削除チェックボックス）。
 Step 3（Engine）完了: AfkStateReplacer + AfkFxProcessor → AfkOperationEngine に統合。AfkOperationContext で Action/FX の差異を吸収（NeedsBlendOut / NeedsBehaviours）。Delete（standalone）+ Replace（content 入れ替え）の 2 操作。Plugin を ProcessAction / ProcessFx に分離。
 Step 4（MenuGenerator + 2パス + Add）完了: AfkMenuGenerator 新規（MA Menu Item + Parameters 生成、#if HAS_MODULAR_AVATAR）。Engine に Add + AddSlotConditionToExistingEntries + EnsureSlotParameter 追加。Plugin を Generating + Transforming.AfterPlugin("MA") の 2 パス構成に移行。複数スロット対応（Delete→Add×N / AddSlotCondition+Add×N）。
 Step 5（GoGoLoco）完了: Inspector に GoGoLoco 検出 + Warning（MA Merge Animator の Controller 名に "GoLoco" を含むか）。ビルド時に多重ネスト SubSM 検出 → エラーログ + Action 処理スキップ。Scanner に HasNestedSubStateMachines 追加。
+
+バグ修正 2 件:
+- AfkMenuGenerator の MenuInstaller + 親 SubMenu(Children) MenuItem 欠落修正（MA の MenuInstallHook が MenuInstaller を発見できず Expression Menu が生成されなかった）
+- Add 操作の AnyState 再発火修正（per-state 入口遷移に統一。AnyState → AFK_Intro が AFK 中に他ステートから再発火して無限ループになる問題）
+
+追加機能 6 件:
+- メニューインストール先指定（ObjectField + MA AvMenuTreeViewWindow リフレクションによるツリーブラウザボタン）
+- プレハブリスト最適化（Action+FX コントローラペアでグルーピング、代表 + "(N variants)" 表示）
+- slot 0「元の AFK」メニュー項目生成（removeActionAfk=false 時）
+- 先頭スロット = デフォルトスロット方式（並び替えで変更可能。EnsureSlotParameter の defaultInt は removeActionAfk に応じて 0 or 1）
+- メニュー名カスタマイズ（originalAfkMenuName フィールド、slot 0 の表示名を変更可能）
+- SubMenu(Children) 非対応 Warn ログ（ModularAvatarMenuInstallTarget が internal クラスのため、ツリーブラウザで SubMenu(Children) 選択時に警告）
+
+クローズアウト調整 5 件:
+- MissingScript 検出警告 UI（v1.x→v2.0.0 マイグレーション補助。OnInspectorGUI 冒頭に HelpBox + パス + Ping ボタン + 再スキャン）
+- Slot 1 フォールバック排他制御（removeActionAfk=ON + sources>=2 で VRChat メニュー全 OFF 時の AFK 不発火バグ修正）
+- defaultSlotIndex 削除（「並び替えで先頭 = デフォルト = ★ スロット」に一本化。UI とデータ構造を単純化）
+- Inspector ★ バッジ + miniLabel 説明文（removeActionAfk=ON + sources>=2 時のみ。先頭スロットが fallback であることを視覚化）
+- package.json name 戻し（com.sebanne.afk-changer 維持）+ displayName AFK Manager + version 2.0.0 + Plugin QualifiedName 修正
 
 v1.0.2 公開済み（GitHub Release / VPM listing / VCC / BOOTH）。
 BOOTH 商品ページ公開済み（説明文・タグ・zip・クレジット・サムネは後日）。
@@ -83,7 +104,7 @@ Component/Inspector 詳細設計確定（付け外し型 UI）。
 
 ## 入力
 
-- Action: AfkSlot のリストで指定。各スロットは Avatar/Prefab または Controller 入力。removeActionAfk で元 AFK の削除制御
+- Action: AfkSlot のリストで指定。各スロットは Avatar/Prefab または Controller 入力。originalAfkOrder で元 AFK の位置制御（-1 = 削除、0+ = リスト内位置）
 
 - FX: removeFxAfk で FX レイヤーの AFK パラメータ関連ステートを削除。「付ける」側は 2.1+ で Object Toggle 構想と合わせて設計
 
@@ -99,11 +120,12 @@ Component/Inspector 詳細設計確定（付け外し型 UI）。
 
 ## ファイル構成
 
-- `Runtime/AfkManagerComponent.cs` — MonoBehaviour + AfkSlot + AfkSourceInputType。removeActionAfk / actionSources / removeFxAfk
+- `Runtime/AfkManagerComponent.cs` — MonoBehaviour + AfkSlot + AfkSourceInputType。originalAfkOrder / actionSources / menuInstallTarget / originalAfkMenuName / removeFxAfk
 - `Editor/AfkManagerPlugin.cs` — NDMF Plugin。Generating フェーズで AFK 処理実行
 - `Editor/AfkManagerEditor.cs` — CustomEditor。付け外し型 UI（Action / FX セクション、ReorderableList、スキャンキャッシュ）
 - `Editor/Core/AfkStateScanner.cs` — BFS 走査 + content/skeleton 分類
 - `Editor/Core/AfkOperationEngine.cs` — Delete / Replace / Add 操作 + SlotParameter 管理。旧 Replacer + FxProcessor 統合
+- `Editor/Core/EffectiveSlot.cs` — originalAfkOrder + actionSources から合成した effectiveSlots の型 + Build 静的メソッド
 - `Editor/Core/AfkScanResult.cs` — スキャン結果データクラス
 - `Editor/Core/ActionControllerResolver.cs` — Descriptor → 指定レイヤー → AnimatorController 取得ロジック共通化（AnimLayerType パラメータ化）
 - `Editor/Core/AfkOperationContext.cs` — 操作コンテキスト（ForAction / ForFxLayer ファクトリ）
@@ -206,22 +228,37 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 - Blend Out AFK だけで 10 ステート × 33 Entry 遷移
 - 現行 Scanner/Replacer は 1 階層 SubSM + flat のみ対応。2.0.0 では検出 + 警告 + スキップ
 
+### effectiveSlots[0] フォールバック排他制御
+
+- 有効スロット数 >= 2 の時、Expression Parameter default=1（1-based スロット値スキーム） + effectiveSlots[0] の Transition 条件を `AFK=true AND AfkManagerSlot <= 1`（AnimatorConditionMode.Less, slotValue+1）にする
+- VRChat メニュー全 OFF 時（param=0）も effectiveSlots[0] が発火する
+- value=0 に対応するメニュー項目がない構造的問題の解決パターン
+- effectiveSlots[0] が IsOriginal=true なら `AddSlotConditionToExistingEntries(ctx, 1, isFallbackSlot=true)` で既存 entries に付与、IsOriginal=false なら `Add(..., slotValue=1, isFallbackSlot=true)` で新規 entries に付与
+- effectiveSlots[i>=1] は従来通り `Equals (i+1)`
+
+### MissingScript 検出 UI パターン
+
+- `GetComponentsInChildren<Transform>(true)` で全 child 走査 + 各 GameObject の `GetComponents<Component>()` で null 要素を検出する方式
+- OnEnable で初回スキャン + 「再スキャン」ボタンで手動更新（毎フレーム実行しない）
+- Inspector の OnInspectorGUI 冒頭で描画
+- パス表示は AnimationUtility.CalculateTransformPath、Ping は EditorGUIUtility.PingObject + Selection.activeGameObject
+
 ## UI
 
 - アバタールートに付ける MonoBehaviour コンポーネント（AfkManagerComponent）
 - Action セクション（helpBox 枠）:
   - 「現在の AFK」miniLabel（アバターの Action Controller をスキャンして表示）
-  - 「元の AFK を外す」チェックボックス（removeActionAfk）
+  - 「元の AFK を外す」チェックボックス（originalAfkOrder の -1/0 バインド）
   - 「付ける AFK」ReorderableList（ドラッグ並べ替え対応）
   - 各スロット: InputType Popup（Avatar/Prefab or Controller）+ ObjectField + スキャン結果 miniLabel
   - MA 必須構成の時のみスロット名フィールド表示
 - FX セクション（helpBox 枠）:
   - 「現在の FX AFK」miniLabel + 「元の FX AFK を外す」チェックボックス
 - 表示ルール:
-  - removeActionAfk ON + ソース 0 → Warning「棒立ち」
+  - originalAfkOrder == -1 + ソース 0 → Warning「棒立ち」
   - MA 必須 + MA 未検出 → Warning「MA が必要です」
   - MA 必須 + MA 検出 → Info「Expression Menu で切り替え」
-  - MA 必須判定: sourceCount >= 2 || (!removeAction && sourceCount >= 1)
+  - MA 必須判定: 有効スロット数 >= 2（= actionSources.Count + (originalAfkOrder >= 0 ? 1 : 0) >= 2）
 
 ## Current Blocker
 
@@ -245,28 +282,4 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 
 ## 次フェーズ候補
 
-### 2.0.0 コア
-
-- AFK Manager 構想（追加・削除・入れ替えの3操作 × Action/FX 2レイヤー）← 設計済み
-- GoGoLoco 検出 + 警告 + スキップ（2.0.0 では非対応。プレハブ置き型で MA マージ依存のため安全に止める）
-- 混合パターン（target=SubSM / source=flat、またはその逆）のハンドリング改善
-- ステート名マッチ依存の再接続改善（v1.0.x で大部分済み、残存箇所を GoGoLoco と合わせて対応）
-
-### 2.1+
-
-- ソースプリセット/スロット機能（保存してプルダウンから呼び出し）
-- AFK 以外の MA 型エモートギミック → AFK 変換
-- FX レイヤーの AFK ステート削除（選択制）
-- FX Replace（Animator が分かる人向けの上級機能）
-- AFK Object Toggle 構想（FX の AFK 操作を「AFK 中にオブジェクト ON/OFF」で直接指定する UI。FX の本命候補）
-- アバタープレハブ自動リスト化（VRC Avatar Descriptor 走査 → プルダウン）
-- AFK サムネ機能（ソース入力時にプレビュー表示）
-- Action スロットごとの FX 紐づけ（各 AFK モーションに対応する FX 効果をセットで管理）
-- Document 整備
-
-### その他
-
-- モード1: AnimationClip 差し替え（既存 AFK ステートの Motion のみ入れ替え）
-- Action Layer 未設定時の挙動
-- Dry Run / Inspector プレビュー
-- MA Menu 連携
+Notion 次フェーズ候補 DB（リポ=AFK Changer）を参照。

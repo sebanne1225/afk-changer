@@ -25,12 +25,12 @@ namespace Sebanne.AfkManager
     public sealed class AfkManagerComponent : MonoBehaviour, VRC.SDKBase.IEditorOnly
     {
         // === Action ===
-        public bool removeActionAfk;
+        // -1 = 元 AFK 削除 / 0 以上 = actionSources 内の挿入位置
+        public int originalAfkOrder = 0;
         public List<AfkSlot> actionSources = new();
 
         // === Menu ===
         public VRCExpressionsMenu menuInstallTarget;
-        public int defaultSlotIndex = -1;
         public string originalAfkMenuName = "元の AFK";
 
         // === FX ===

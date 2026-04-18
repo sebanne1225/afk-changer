@@ -10,10 +10,8 @@ namespace Sebanne.AfkManager.Editor.Core
     {
         internal static void Generate(
             GameObject avatarRoot,
-            List<AfkSlot> slots,
-            bool removeActionAfk,
+            List<EffectiveSlot> effectiveSlots,
             VRCExpressionsMenu installTarget,
-            int defaultSlot,
             string originalMenuName)
         {
             var menuObj = new GameObject("AFK Manager");
@@ -29,54 +27,47 @@ namespace Sebanne.AfkManager.Editor.Core
             parentMenuItem.PortableControl.Type = PortableControlType.SubMenu;
             parentMenuItem.MenuSource = SubmenuSource.Children;
 
-            // Parameter declaration
+            // Parameter declaration (default=1, 1-based slot value scheme)
             var maParams = menuObj.AddComponent<ModularAvatarParameters>();
             maParams.parameters.Add(new ParameterConfig
             {
                 nameOrPrefix = AfkOperationEngine.SlotParameterName,
                 syncType = ParameterSyncType.Int,
-                defaultValue = defaultSlot,
+                defaultValue = 1,
                 saved = true
             });
 
-            // Slot 0: original AFK (only when keeping original)
-            if (!removeActionAfk)
+            // Menu items (effectiveSlots[0] is fallback slot = default)
+            for (var i = 0; i < effectiveSlots.Count; i++)
             {
-                var slot0Name = string.IsNullOrEmpty(originalMenuName) ? "元の AFK" : originalMenuName;
-                var slot0Obj = new GameObject(slot0Name);
-                slot0Obj.transform.SetParent(menuObj.transform, false);
+                var slot = effectiveSlots[i];
+                var slotValue = i + 1;
 
-                var slot0Item = slot0Obj.AddComponent<ModularAvatarMenuItem>();
-                slot0Item.PortableControl.Type = PortableControlType.Toggle;
-                slot0Item.PortableControl.Parameter = AfkOperationEngine.SlotParameterName;
-                slot0Item.PortableControl.Value = 0;
-                slot0Item.isSynced = true;
-                slot0Item.isSaved = true;
-                slot0Item.isDefault = defaultSlot == 0;
-            }
+                string itemName;
+                if (slot.IsOriginal)
+                {
+                    itemName = string.IsNullOrEmpty(originalMenuName) ? "元の AFK" : originalMenuName;
+                }
+                else
+                {
+                    itemName = string.IsNullOrEmpty(slot.Source.slotName)
+                        ? $"AFK {slotValue}"
+                        : slot.Source.slotName;
+                }
 
-            // Menu items per added slot
-            for (var i = 0; i < slots.Count; i++)
-            {
-                var slotIndex = i + 1;
-                var slotName = string.IsNullOrEmpty(slots[i].slotName)
-                    ? $"AFK {slotIndex}"
-                    : slots[i].slotName;
-
-                var itemObj = new GameObject(slotName);
+                var itemObj = new GameObject(itemName);
                 itemObj.transform.SetParent(menuObj.transform, false);
 
                 var menuItem = itemObj.AddComponent<ModularAvatarMenuItem>();
                 menuItem.PortableControl.Type = PortableControlType.Toggle;
                 menuItem.PortableControl.Parameter = AfkOperationEngine.SlotParameterName;
-                menuItem.PortableControl.Value = slotIndex;
+                menuItem.PortableControl.Value = slotValue;
                 menuItem.isSynced = true;
                 menuItem.isSaved = true;
-                menuItem.isDefault = slotIndex == defaultSlot;
+                menuItem.isDefault = (i == 0);
             }
 
-            var totalItems = removeActionAfk ? slots.Count : slots.Count + 1;
-            AfkLog.Info($"Generated MA menu: {totalItems} item(s), default={defaultSlot}.");
+            AfkLog.Info($"Generated MA menu: {effectiveSlots.Count} item(s), default=1 (first slot).");
         }
     }
 }

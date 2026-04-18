@@ -61,8 +61,21 @@ namespace Sebanne.AfkManager.Editor.Core
             AfkScanResult sourceScan,
             AnimatorController sourceController,
             int slotIndex,
-            AnimatorState sharedBlendOut)
+            AnimatorState sharedBlendOut,
+            bool isFallbackSlot = false)
         {
+            void AddSlotCondition(AnimatorStateTransition transition)
+            {
+                if (isFallbackSlot)
+                    transition.AddCondition(AnimatorConditionMode.Less, slotIndex + 1, SlotParameterName);
+                else
+                    transition.AddCondition(AnimatorConditionMode.Equals, slotIndex, SlotParameterName);
+            }
+
+            string SlotConditionText() => isFallbackSlot
+                ? $"{SlotParameterName}<{slotIndex + 1}"
+                : $"{SlotParameterName}={slotIndex}";
+
             if (!sourceScan.HasAfkStates)
             {
                 AfkLog.Error("Source controller has no AFK states.");
@@ -98,8 +111,8 @@ namespace Sebanne.AfkManager.Editor.Core
 
                     var t = entry.SourceState.AddTransition(newEntry);
                     CopyTransitionSettings(entry.Transition, t);
-                    t.AddCondition(AnimatorConditionMode.Equals, slotIndex, SlotParameterName);
-                    AfkLog.Info($"Entry: {entry.SourceState.name} → {newEntry.name} ({SlotParameterName}={slotIndex})");
+                    AddSlotCondition(t);
+                    AfkLog.Info($"Entry: {entry.SourceState.name} → {newEntry.name} ({SlotConditionText()})");
                     created = true;
                 }
 
@@ -109,8 +122,8 @@ namespace Sebanne.AfkManager.Editor.Core
 
                     var t = rootSm.AddAnyStateTransition(newEntry);
                     CopyTransitionSettings(entry.Transition, t);
-                    t.AddCondition(AnimatorConditionMode.Equals, slotIndex, SlotParameterName);
-                    AfkLog.Info($"Entry: AnyState → {newEntry.name} ({SlotParameterName}={slotIndex})");
+                    AddSlotCondition(t);
+                    AfkLog.Info($"Entry: AnyState → {newEntry.name} ({SlotConditionText()})");
                     created = true;
                 }
 
@@ -141,8 +154,23 @@ namespace Sebanne.AfkManager.Editor.Core
             return true;
         }
 
-        internal static void AddSlotConditionToExistingEntries(AfkOperationContext ctx, int slotValue)
+        internal static void AddSlotConditionToExistingEntries(
+            AfkOperationContext ctx,
+            int slotValue,
+            bool isFallbackSlot = false)
         {
+            void AddSlotCondition(AnimatorStateTransition transition)
+            {
+                if (isFallbackSlot)
+                    transition.AddCondition(AnimatorConditionMode.Less, slotValue + 1, SlotParameterName);
+                else
+                    transition.AddCondition(AnimatorConditionMode.Equals, slotValue, SlotParameterName);
+            }
+
+            string SlotConditionText() => isFallbackSlot
+                ? $"{SlotParameterName}<{slotValue + 1}"
+                : $"{SlotParameterName}={slotValue}";
+
             var rootSm = ctx.RootStateMachine;
 
             // Recreate AnyState entries with added slot condition
@@ -163,8 +191,8 @@ namespace Sebanne.AfkManager.Editor.Core
                 // Recreate with added slot condition
                 var newT = rootSm.AddAnyStateTransition(dest);
                 CopyTransitionSettings(oldTransition, newT);
-                newT.AddCondition(AnimatorConditionMode.Equals, slotValue, SlotParameterName);
-                AfkLog.Info($"Tagged AnyState → {dest.name} with {SlotParameterName}={slotValue}");
+                AddSlotCondition(newT);
+                AfkLog.Info($"Tagged AnyState → {dest.name} with {SlotConditionText()}");
             }
 
             // Recreate per-state entries with added slot condition
@@ -186,8 +214,8 @@ namespace Sebanne.AfkManager.Editor.Core
                 // Recreate with added slot condition
                 var newT = source.AddTransition(dest);
                 CopyTransitionSettings(oldTransition, newT);
-                newT.AddCondition(AnimatorConditionMode.Equals, slotValue, SlotParameterName);
-                AfkLog.Info($"Tagged {source.name} → {dest.name} with {SlotParameterName}={slotValue}");
+                AddSlotCondition(newT);
+                AfkLog.Info($"Tagged {source.name} → {dest.name} with {SlotConditionText()}");
             }
         }
 

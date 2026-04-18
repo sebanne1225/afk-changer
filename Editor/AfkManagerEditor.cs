@@ -17,7 +17,7 @@ namespace Sebanne.AfkManager.Editor
         private static readonly string[] InputTypeLabels = { "Avatar/Prefab", "Controller" };
 
         // --- SerializedProperties ---
-        private SerializedProperty _removeActionAfkProp;
+        private SerializedProperty _originalAfkOrderProp;
         private SerializedProperty _actionSourcesProp;
         private SerializedProperty _removeFxAfkProp;
 
@@ -35,6 +35,9 @@ namespace Sebanne.AfkManager.Editor
         // --- FX scan cache ---
         private AnimatorController _cachedFxController;
         private List<AfkFxLayerScanResult> _fxScanResults;
+
+        // --- MissingScript detection cache ---
+        private readonly List<GameObject> _missingScriptObjects = new();
 
         // --- Per-slot scan cache ---
         private struct SlotScanCache
@@ -72,12 +75,13 @@ namespace Sebanne.AfkManager.Editor
                 return;
             }
 
-            _removeActionAfkProp = serializedObject.FindProperty("removeActionAfk");
+            _originalAfkOrderProp = serializedObject.FindProperty("originalAfkOrder");
             _actionSourcesProp = serializedObject.FindProperty("actionSources");
             _removeFxAfkProp = serializedObject.FindProperty("removeFxAfk");
 
             SetupReorderableList();
             InvalidateAllCaches();
+            RefreshMissingScripts();
 
             if (!_avatarPrefabsScanned)
                 ScanAvatarPrefabs();
@@ -87,11 +91,70 @@ namespace Sebanne.AfkManager.Editor
         {
             serializedObject.Update();
 
+            DrawMissingScriptWarning();
             DrawActionSection();
             EditorGUILayout.Space(8);
             DrawFxSection();
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        // =====================================================================
+        // MissingScript Detection
+        // =====================================================================
+
+        private void RefreshMissingScripts()
+        {
+            _missingScriptObjects.Clear();
+
+            var avatarObj = ((Component)target).gameObject;
+            if (avatarObj == null) return;
+
+            var transforms = avatarObj.GetComponentsInChildren<Transform>(true);
+            foreach (var t in transforms)
+            {
+                var components = t.gameObject.GetComponents<Component>();
+                foreach (var c in components)
+                {
+                    if (c == null)
+                    {
+                        _missingScriptObjects.Add(t.gameObject);
+                        break;
+                    }
+                }
+            }
+        }
+
+        private void DrawMissingScriptWarning()
+        {
+            if (_missingScriptObjects.Count == 0) return;
+
+            EditorGUILayout.HelpBox(
+                "v1.x からアップデートされたアバターで、旧コンポーネント（MissingScript）が検出されました。2.0.0 と互換性がないため、該当コンポーネントを削除してください。",
+                MessageType.Warning);
+
+            var avatarRoot = ((Component)target).transform;
+            foreach (var go in _missingScriptObjects)
+            {
+                if (go == null) continue;
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    var path = go.transform == avatarRoot
+                        ? "<root>"
+                        : AnimationUtility.CalculateTransformPath(go.transform, avatarRoot);
+                    EditorGUILayout.LabelField(path, EditorStyles.miniLabel);
+                    if (GUILayout.Button("Ping", GUILayout.Width(60)))
+                    {
+                        EditorGUIUtility.PingObject(go);
+                        Selection.activeGameObject = go;
+                    }
+                }
+            }
+
+            if (GUILayout.Button("再スキャン"))
+                RefreshMissingScripts();
+
+            EditorGUILayout.Space(8);
         }
 
         // =====================================================================
@@ -112,32 +175,27 @@ namespace Sebanne.AfkManager.Editor
 
             EditorGUILayout.Space(4);
 
-            // Remove checkbox
-            EditorGUILayout.PropertyField(_removeActionAfkProp, new GUIContent("元の AFK を外す"));
+            // Remove checkbox (int-backed: -1 = removed, 0+ = included)
+            var isRemoved = _originalAfkOrderProp.intValue == -1;
+            var newIsRemoved = EditorGUILayout.Toggle("元の AFK を外す", isRemoved);
+            if (newIsRemoved != isRemoved)
+                _originalAfkOrderProp.intValue = newIsRemoved ? -1 : 0;
 
-            // Original AFK menu name + default checkbox (only when keeping original + MA needed)
-            if (!_removeActionAfkProp.boolValue && NeedsModularAvatar())
+            // Original AFK menu name (only when keeping original + MA needed)
+            if (_originalAfkOrderProp.intValue >= 0 && NeedsModularAvatar())
             {
-                const float checkWidth = 80f;
-                var row = EditorGUILayout.GetControlRect();
-
-                var nameRect = new Rect(row.x, row.y, row.width - checkWidth, row.height);
                 var nameProp = serializedObject.FindProperty("originalAfkMenuName");
-                EditorGUI.PropertyField(nameRect, nameProp, new GUIContent("メニュー名"));
-
-                var defaultProp = serializedObject.FindProperty("defaultSlotIndex");
-                var resolved = defaultProp.intValue >= 0 ? defaultProp.intValue : 0;
-                var isDefault = resolved == 0;
-                var checkRect = new Rect(row.xMax - checkWidth, row.y, checkWidth, row.height);
-                var newDefault = EditorGUI.ToggleLeft(checkRect, "デフォルト", isDefault);
-                if (newDefault != isDefault)
-                    defaultProp.intValue = newDefault ? 0 : -1;
+                EditorGUILayout.PropertyField(nameProp, new GUIContent("メニュー名"));
             }
 
             EditorGUILayout.Space(4);
 
             // Slot list
             _slotList.DoLayoutList();
+
+            // Fallback hint (only when first slot is the menu-off default)
+            if (_originalAfkOrderProp.intValue == -1 && _actionSourcesProp.arraySize >= 2)
+                EditorGUILayout.LabelField("先頭スロットがメニュー OFF 時のデフォルトになります", EditorStyles.miniLabel);
 
             // Drop area
             DrawDropArea();
@@ -172,10 +230,10 @@ namespace Sebanne.AfkManager.Editor
             if (_gogoLocoDetected)
                 EditorGUILayout.HelpBox("GoGoLoco との併用には対応していません", MessageType.Warning);
 
-            var removeAction = _removeActionAfkProp.boolValue;
+            var isOriginalRemoved = _originalAfkOrderProp.intValue == -1;
             var sourceCount = _actionSourcesProp.arraySize;
 
-            if (removeAction && sourceCount == 0)
+            if (isOriginalRemoved && sourceCount == 0)
                 EditorGUILayout.HelpBox("AFK なしでは棒立ちになります", MessageType.Warning);
 
             if (NeedsModularAvatar())
@@ -307,24 +365,15 @@ namespace Sebanne.AfkManager.Editor
             RefreshSlotScan(index);
             DrawSlotScanInfo(scanRect, index);
 
-            // Row 2: SlotName + Default checkbox (only when MA is needed)
+            // Row 2: SlotName (only when MA is needed)
             if (NeedsModularAvatar())
             {
                 y += lineHeight + spacing;
-                const float checkWidth = 80f;
 
-                var nameRect = new Rect(rect.x, y, rect.width - checkWidth, lineHeight);
-                EditorGUI.PropertyField(nameRect, slotNameProp, new GUIContent("メニュー名"));
-
-                var slotIndex = index + 1;
-                var defaultProp = serializedObject.FindProperty("defaultSlotIndex");
-                var autoFallback = _removeActionAfkProp.boolValue ? 1 : 0;
-                var resolved = defaultProp.intValue >= 0 ? defaultProp.intValue : autoFallback;
-                var isDefault = resolved == slotIndex;
-                var checkRect = new Rect(rect.xMax - checkWidth, y, checkWidth, lineHeight);
-                var newDefault = EditorGUI.ToggleLeft(checkRect, "デフォルト", isDefault);
-                if (newDefault != isDefault)
-                    defaultProp.intValue = newDefault ? slotIndex : -1;
+                var nameRect = new Rect(rect.x, y, rect.width, lineHeight);
+                var isFallback = _originalAfkOrderProp.intValue == -1 && _actionSourcesProp.arraySize >= 2 && index == 0;
+                var labelText = isFallback ? "★ メニュー名" : "メニュー名";
+                EditorGUI.PropertyField(nameRect, slotNameProp, new GUIContent(labelText));
             }
         }
 
@@ -710,8 +759,8 @@ namespace Sebanne.AfkManager.Editor
         private bool NeedsModularAvatar()
         {
             var sourceCount = _actionSourcesProp.arraySize;
-            var removeAction = _removeActionAfkProp.boolValue;
-            return sourceCount >= 2 || (!removeAction && sourceCount >= 1);
+            var originalIncluded = _originalAfkOrderProp.intValue >= 0;
+            return sourceCount + (originalIncluded ? 1 : 0) >= 2;
         }
 
 #if HAS_MODULAR_AVATAR

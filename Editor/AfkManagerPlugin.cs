@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using nadena.dev.ndmf;
 using Sebanne.AfkManager;
 using Sebanne.AfkManager.Editor.Core;
@@ -13,7 +14,7 @@ namespace Sebanne.AfkManager.Editor
     public sealed class AfkManagerPlugin : Plugin<AfkManagerPlugin>
     {
         public override string DisplayName => "AFK Manager";
-        public override string QualifiedName => "com.sebanne.afk-manager";
+        public override string QualifiedName => "com.sebanne.afk-changer";
 
         protected override void Configure()
         {
@@ -23,16 +24,21 @@ namespace Sebanne.AfkManager.Editor
                 {
                     var component = ctx.AvatarRootObject.GetComponent<AfkManagerComponent>();
                     if (component == null) return;
-                    if (!NeedsModularAvatar(component)) return;
+
+                    var descriptor = ctx.AvatarRootObject.GetComponent<VRCAvatarDescriptor>();
+                    if (descriptor == null) return;
+
+                    var avatarController = FindLayerController(descriptor, VRCAvatarDescriptor.AnimLayerType.Action);
+                    var effectiveSlots = EffectiveSlot.Build(
+                        component.originalAfkOrder, component.actionSources, avatarController);
+
+                    if (effectiveSlots.Count < 2) return;
 
 #if HAS_MODULAR_AVATAR
-                    var defaultSlot = ResolveDefaultSlot(component);
                     AfkMenuGenerator.Generate(
                         ctx.AvatarRootObject,
-                        component.actionSources,
-                        component.removeActionAfk,
+                        effectiveSlots,
                         component.menuInstallTarget,
-                        defaultSlot,
                         component.originalAfkMenuName);
 #else
                     AfkLog.Error("Modular Avatar is required for multi-slot AFK configuration. " +
@@ -57,8 +63,7 @@ namespace Sebanne.AfkManager.Editor
                             return;
                         }
 
-                        var defaultSlot = ResolveDefaultSlot(component);
-                        ProcessAction(component, descriptor, defaultSlot);
+                        ProcessAction(component, descriptor);
                         ProcessFx(component, descriptor);
                     }
                     finally
@@ -72,12 +77,12 @@ namespace Sebanne.AfkManager.Editor
         // Action processing
         // =====================================================================
 
-        private static void ProcessAction(AfkManagerComponent component, VRCAvatarDescriptor descriptor, int defaultSlot)
+        private static void ProcessAction(AfkManagerComponent component, VRCAvatarDescriptor descriptor)
         {
             var actionController = FindLayerController(descriptor, VRCAvatarDescriptor.AnimLayerType.Action);
             if (actionController == null)
             {
-                if (component.removeActionAfk || component.actionSources.Count > 0)
+                if (component.originalAfkOrder == -1 || component.actionSources.Count > 0)
                     AfkLog.Warn("Action layer controller not found or not set. Skipping Action processing.");
                 return;
             }
@@ -90,51 +95,55 @@ namespace Sebanne.AfkManager.Editor
                 return;
             }
 
+            var effectiveSlots = EffectiveSlot.Build(
+                component.originalAfkOrder, component.actionSources, actionController);
+
             var targetScan = AfkStateScanner.Scan(actionController);
             var ctx = AfkOperationContext.ForAction(actionController, targetScan);
 
-            // Resolve all sources
-            var resolved = ResolveAllSlots(component.actionSources);
-            var needsMA = NeedsModularAvatar(component);
-
-            if (component.removeActionAfk && resolved.Count == 1 && !needsMA)
+            // Count == 0: Delete only (original removed, no added sources)
+            if (effectiveSlots.Count == 0)
             {
-                // Single-slot Replace
-                AfkOperationEngine.Replace(ctx, resolved[0].scan, resolved[0].controller);
-            }
-            else if (component.removeActionAfk && resolved.Count >= 2)
-            {
-                // Delete all, then Add each slot
-                AfkOperationEngine.Delete(ctx);
-                AfkOperationEngine.EnsureSlotParameter(actionController, defaultSlot);
-
-                var blendOut = ctx.NeedsBlendOut
-                    ? AfkOperationEngine.CreateSharedBlendOut(ctx)
-                    : null;
-
-                for (var i = 0; i < resolved.Count; i++)
-                    AfkOperationEngine.Add(ctx, resolved[i].scan, resolved[i].controller, i + 1, blendOut);
-            }
-            else if (component.removeActionAfk)
-            {
-                // Delete only
                 if (targetScan.HasAfkStates)
                     AfkOperationEngine.Delete(ctx);
                 else
                     AfkLog.Info("No existing AFK states to delete in Action layer.");
+                return;
             }
-            else if (resolved.Count > 0)
+
+            // Count == 1 && IsOriginal: no-op (keep original as-is)
+            if (effectiveSlots.Count == 1 && effectiveSlots[0].IsOriginal)
+                return;
+
+            // Count == 1 && !IsOriginal: Replace (single source, original removed)
+            if (effectiveSlots.Count == 1)
             {
-                // Add: keep original, add new slots alongside
-                AfkOperationEngine.EnsureSlotParameter(actionController, defaultSlot);
-                AfkOperationEngine.AddSlotConditionToExistingEntries(ctx, 0);
+                var slot = effectiveSlots[0];
+                AfkOperationEngine.Replace(ctx, slot.Scan, slot.Controller);
+                return;
+            }
 
-                var blendOut = ctx.NeedsBlendOut
-                    ? AfkOperationEngine.CreateSharedBlendOut(ctx)
-                    : null;
+            // Count >= 2: multi-slot mode
+            var needsDelete = !effectiveSlots.Any(s => s.IsOriginal);
+            if (needsDelete)
+                AfkOperationEngine.Delete(ctx);
 
-                for (var i = 0; i < resolved.Count; i++)
-                    AfkOperationEngine.Add(ctx, resolved[i].scan, resolved[i].controller, i + 1, blendOut);
+            AfkOperationEngine.EnsureSlotParameter(actionController, 1);
+
+            var blendOut = ctx.NeedsBlendOut
+                ? AfkOperationEngine.CreateSharedBlendOut(ctx)
+                : null;
+
+            for (var i = 0; i < effectiveSlots.Count; i++)
+            {
+                var slot = effectiveSlots[i];
+                var slotValue = i + 1;
+                var isFallback = (i == 0);
+
+                if (slot.IsOriginal)
+                    AfkOperationEngine.AddSlotConditionToExistingEntries(ctx, slotValue, isFallback);
+                else
+                    AfkOperationEngine.Add(ctx, slot.Scan, slot.Controller, slotValue, blendOut, isFallback);
             }
         }
 
@@ -172,63 +181,6 @@ namespace Sebanne.AfkManager.Editor
         // =====================================================================
         // Helpers
         // =====================================================================
-
-        private struct ResolvedSlot
-        {
-            public AnimatorController controller;
-            public AfkScanResult scan;
-        }
-
-        private static List<ResolvedSlot> ResolveAllSlots(List<AfkSlot> slots)
-        {
-            var resolved = new List<ResolvedSlot>();
-
-            for (var i = 0; i < slots.Count; i++)
-            {
-                var controller = ResolveSlotController(slots[i]);
-                if (controller == null) continue;
-
-                var scan = AfkStateScanner.Scan(controller);
-                if (!scan.HasAfkStates)
-                {
-                    AfkLog.Error($"Slot {i}: No AFK states found in source controller. Skipping.");
-                    continue;
-                }
-
-                resolved.Add(new ResolvedSlot { controller = controller, scan = scan });
-            }
-
-            return resolved;
-        }
-
-        private static bool NeedsModularAvatar(AfkManagerComponent component)
-        {
-            var sourceCount = component.actionSources.Count;
-            return sourceCount >= 2 || (!component.removeActionAfk && sourceCount >= 1);
-        }
-
-        private static int ResolveDefaultSlot(AfkManagerComponent component)
-        {
-            var minSlot = component.removeActionAfk ? 1 : 0;
-            var maxSlot = component.actionSources.Count;
-            var value = component.defaultSlotIndex;
-            if (value < 0 || value < minSlot || value > maxSlot)
-                return minSlot;
-            return value;
-        }
-
-        private static AnimatorController ResolveSlotController(AfkSlot slot)
-        {
-            if (slot.inputType == AfkSourceInputType.AvatarPrefab)
-            {
-                if (slot.avatarPrefab == null) return null;
-                var descriptor = slot.avatarPrefab.GetComponent<VRCAvatarDescriptor>();
-                if (descriptor == null) return null;
-                return FindLayerController(descriptor, VRCAvatarDescriptor.AnimLayerType.Action);
-            }
-
-            return slot.sourceController as AnimatorController;
-        }
 
         private static AnimatorController FindLayerController(
             VRCAvatarDescriptor descriptor,
