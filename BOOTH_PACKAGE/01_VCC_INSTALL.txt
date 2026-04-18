@@ -1,4 +1,4 @@
-AFK Changer
+AFK Manager
 VCC / VPM 導入手順
 
 推奨導入方法:
@@ -8,9 +8,9 @@ VCC / VPM から導入してください。
 1. VCC を開き、Settings -> Packages -> Add Repository から次の URL を追加してください。
    https://sebanne1225.github.io/sebanne-listing/index.json
 2. package 一覧から
-   AFK Changer
+   AFK Manager
    を追加します
 3. Unity を開き、依存 package が解決されていることを確認します
 
 repo:
-https://github.com/sebanne1225/afk-changer
+https://github.com/sebanne1225/afk-manager
