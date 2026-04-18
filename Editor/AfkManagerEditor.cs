@@ -21,8 +21,18 @@ namespace Sebanne.AfkManager.Editor
         private SerializedProperty _actionSourcesProp;
         private SerializedProperty _removeFxAfkProp;
 
+        // --- Virtual row model (unified Original + action source list) ---
+        private struct VirtualRow
+        {
+            public bool IsOriginal;
+            public int ActionSourceIndex; // -1 when IsOriginal
+        }
+
+        private readonly List<VirtualRow> _virtualRows = new();
+
         // --- ReorderableList ---
         private ReorderableList _slotList;
+        private bool _isDragHovering;
 
         // --- Target scan cache (avatar's own AFK) ---
         private AnimatorController _cachedTargetActionController;
@@ -79,6 +89,7 @@ namespace Sebanne.AfkManager.Editor
             _actionSourcesProp = serializedObject.FindProperty("actionSources");
             _removeFxAfkProp = serializedObject.FindProperty("removeFxAfk");
 
+            RebuildVirtualRows();
             SetupReorderableList();
             InvalidateAllCaches();
             RefreshMissingScripts();
@@ -90,6 +101,7 @@ namespace Sebanne.AfkManager.Editor
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
+            RebuildVirtualRows();
 
             DrawMissingScriptWarning();
             DrawActionSection();
@@ -97,6 +109,34 @@ namespace Sebanne.AfkManager.Editor
             DrawFxSection();
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        // =====================================================================
+        // Virtual Row Model
+        // =====================================================================
+
+        private void RebuildVirtualRows()
+        {
+            _virtualRows.Clear();
+
+            var sourceCount = _actionSourcesProp.arraySize;
+            var originalOrder = _originalAfkOrderProp.intValue;
+
+            for (var i = 0; i < sourceCount; i++)
+                _virtualRows.Add(new VirtualRow { IsOriginal = false, ActionSourceIndex = i });
+
+            if (originalOrder >= 0)
+            {
+                var insertPos = Math.Min(originalOrder, sourceCount);
+                _virtualRows.Insert(insertPos, new VirtualRow { IsOriginal = true, ActionSourceIndex = -1 });
+            }
+        }
+
+        private int GetEffectiveSlotCount()
+        {
+            var sourceCount = _actionSourcesProp.arraySize;
+            var originalIncluded = _originalAfkOrderProp.intValue >= 0;
+            return sourceCount + (originalIncluded ? 1 : 0);
         }
 
         // =====================================================================
@@ -169,36 +209,49 @@ namespace Sebanne.AfkManager.Editor
             EditorGUILayout.LabelField("AFK モーションの入れ替え・削除・追加", EditorStyles.miniLabel);
             EditorGUILayout.Space(2);
 
-            // Current AFK info
+            // Refresh avatar scan (used by Original row and warnings)
             RefreshTargetActionScan();
-            DrawTargetActionInfo();
 
-            EditorGUILayout.Space(4);
-
-            // Remove checkbox (int-backed: -1 = removed, 0+ = included)
-            var isRemoved = _originalAfkOrderProp.intValue == -1;
-            var newIsRemoved = EditorGUILayout.Toggle("元の AFK を外す", isRemoved);
-            if (newIsRemoved != isRemoved)
-                _originalAfkOrderProp.intValue = newIsRemoved ? -1 : 0;
-
-            // Original AFK menu name (only when keeping original + MA needed)
-            if (_originalAfkOrderProp.intValue >= 0 && NeedsModularAvatar())
+            // "元の AFK を含める" Toggle (常時表示)
+            var includeOriginal = _originalAfkOrderProp.intValue >= 0;
+            var newIncludeOriginal = EditorGUILayout.Toggle("元の AFK を含める", includeOriginal);
+            if (newIncludeOriginal != includeOriginal)
             {
-                var nameProp = serializedObject.FindProperty("originalAfkMenuName");
-                EditorGUILayout.PropertyField(nameProp, new GUIContent("メニュー名"));
+                var component = (AfkManagerComponent)target;
+                Undo.RecordObject(component, newIncludeOriginal ? "Include Original AFK" : "Exclude Original AFK");
+                component.originalAfkOrder = newIncludeOriginal ? 0 : -1;
+                EditorUtility.SetDirty(component);
+                serializedObject.Update();
+                RebuildVirtualRows();
             }
 
             EditorGUILayout.Space(4);
 
-            // Slot list
+            // Unified slot list (Original + action sources)
             _slotList.DoLayoutList();
+            var listRect = GUILayoutUtility.GetLastRect();
 
-            // Fallback hint (only when first slot is the menu-off default)
-            if (_originalAfkOrderProp.intValue == -1 && _actionSourcesProp.arraySize >= 2)
-                EditorGUILayout.LabelField("先頭スロットがメニュー OFF 時のデフォルトになります", EditorStyles.miniLabel);
+            var evt = Event.current;
+            switch (evt.type)
+            {
+                case EventType.DragUpdated:
+                case EventType.DragPerform:
+                    _isDragHovering = listRect.Contains(evt.mousePosition) && HasValidDragObjects();
+                    break;
+                case EventType.DragExited:
+                case EventType.MouseUp:
+                    _isDragHovering = false;
+                    break;
+            }
 
-            // Drop area
-            DrawDropArea();
+            if (evt.type == EventType.Repaint && _isDragHovering)
+                EditorGUI.DrawRect(listRect, new Color(0.5f, 0.8f, 1f, 0.15f));
+
+            HandleDragDropInRect(listRect);
+
+            // Fallback hint (first slot becomes menu-off default when effectiveSlotCount >= 2)
+            if (GetEffectiveSlotCount() >= 2)
+                EditorGUILayout.LabelField("\u2605 先頭スロットがメニュー OFF 時のデフォルトになります", EditorStyles.miniLabel);
 
             // Warnings / Info
             DrawActionWarnings();
@@ -206,23 +259,24 @@ namespace Sebanne.AfkManager.Editor
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawTargetActionInfo()
+        private void DrawTargetScanInfo(Rect rect)
         {
             if (_targetActionError != null)
             {
-                EditorGUILayout.LabelField($"現在の AFK: {_targetActionError}", EditorStyles.miniLabel);
+                var prev = GUI.color;
+                GUI.color = new Color(1f, 0.7f, 0.3f);
+                EditorGUI.LabelField(rect, _targetActionError, EditorStyles.miniLabel);
+                GUI.color = prev;
                 return;
             }
 
             if (_targetActionScan == null || !_targetActionScan.HasAfkStates)
             {
-                EditorGUILayout.LabelField("現在の AFK: 未検出", EditorStyles.miniLabel);
+                EditorGUI.LabelField(rect, "AFK 未検出", EditorStyles.miniLabel);
                 return;
             }
 
-            EditorGUILayout.LabelField(
-                $"現在の AFK: {FormatScanResult(_targetActionScan)}",
-                EditorStyles.miniLabel);
+            EditorGUI.LabelField(rect, FormatScanResult(_targetActionScan), EditorStyles.miniLabel);
         }
 
         private void DrawActionWarnings()
@@ -300,23 +354,77 @@ namespace Sebanne.AfkManager.Editor
 
         private void SetupReorderableList()
         {
-            _slotList = new ReorderableList(serializedObject, _actionSourcesProp, true, true, true, true);
-            _slotList.drawHeaderCallback = DrawSlotHeader;
-            _slotList.drawElementCallback = DrawSlotElement;
-            _slotList.elementHeightCallback = GetSlotElementHeight;
-            _slotList.onAddCallback = OnSlotAdd;
-            _slotList.onReorderCallbackWithDetails = OnSlotReorder;
-            _slotList.drawNoneElementCallback = DrawEmptyListDropTarget;
+            _slotList = new ReorderableList(_virtualRows, typeof(VirtualRow), true, true, true, true)
+            {
+                drawHeaderCallback = DrawSlotHeader,
+                drawElementCallback = DrawSlotElement,
+                elementHeightCallback = GetSlotElementHeight,
+                onAddCallback = OnSlotAdd,
+                onRemoveCallback = OnSlotRemove,
+                onReorderCallbackWithDetails = OnSlotReorder,
+                drawNoneElementCallback = DrawEmptyPickerInList,
+                elementHeight = 60f,
+            };
         }
 
         private void DrawSlotHeader(Rect rect)
         {
-            EditorGUI.LabelField(rect, "付ける AFK");
+            EditorGUI.LabelField(rect, "AFK スロット");
         }
 
         private void DrawSlotElement(Rect rect, int index, bool isActive, bool isFocused)
         {
-            var element = _actionSourcesProp.GetArrayElementAtIndex(index);
+            if (index >= _virtualRows.Count) return;
+
+            var row = _virtualRows[index];
+            if (row.IsOriginal)
+                DrawOriginalSlotElement(rect, index);
+            else
+                DrawActionSourceSlotElement(rect, index, row.ActionSourceIndex);
+        }
+
+        private void DrawOriginalSlotElement(Rect rect, int displayIndex)
+        {
+            var y = rect.y + 2;
+            var lineHeight = EditorGUIUtility.singleLineHeight;
+            const float spacing = 2f;
+            const float badgeWidth = 18f;
+            const float scanWidth = 112f;
+            const float gap = 4f;
+
+            var showFallbackBadge = displayIndex == 0 && GetEffectiveSlotCount() >= 2;
+
+            var x = rect.x;
+            if (showFallbackBadge)
+            {
+                EditorGUI.LabelField(new Rect(x, y, badgeWidth, lineHeight), "\u2605");
+                x += badgeWidth + gap;
+            }
+
+            var scanRect = new Rect(rect.xMax - scanWidth, y, scanWidth, lineHeight);
+            var labelWidth = scanRect.x - x - gap;
+            if (labelWidth < 40f) labelWidth = 40f;
+            var labelRect = new Rect(x, y, labelWidth, lineHeight);
+            EditorGUI.LabelField(labelRect, "元の AFK", EditorStyles.boldLabel);
+
+            DrawTargetScanInfo(scanRect);
+
+            // Row 2: メニュー名 (only when MA is needed)
+            if (NeedsModularAvatar())
+            {
+                y += lineHeight + spacing;
+                var menuNameProp = serializedObject.FindProperty("originalAfkMenuName");
+                var nameRect = new Rect(rect.x, y, rect.width, lineHeight);
+                var labelText = showFallbackBadge ? "\u2605 メニュー名" : "メニュー名";
+                EditorGUI.PropertyField(nameRect, menuNameProp, new GUIContent(labelText));
+            }
+        }
+
+        private void DrawActionSourceSlotElement(Rect rect, int displayIndex, int sourceIndex)
+        {
+            if (sourceIndex < 0 || sourceIndex >= _actionSourcesProp.arraySize) return;
+
+            var element = _actionSourcesProp.GetArrayElementAtIndex(sourceIndex);
             var inputTypeProp = element.FindPropertyRelative("inputType");
             var avatarPrefabProp = element.FindPropertyRelative("avatarPrefab");
             var sourceControllerProp = element.FindPropertyRelative("sourceController");
@@ -325,13 +433,23 @@ namespace Sebanne.AfkManager.Editor
             var y = rect.y + 2;
             var lineHeight = EditorGUIUtility.singleLineHeight;
             const float spacing = 2f;
+            const float badgeWidth = 18f;
             const float typeWidth = 110f;
             const float scanWidth = 112f;
             const float dropBtnWidth = 18f;
             const float gap = 4f;
 
+            var showFallbackBadge = displayIndex == 0 && GetEffectiveSlotCount() >= 2;
+
+            var x = rect.x;
+            if (showFallbackBadge)
+            {
+                EditorGUI.LabelField(new Rect(x, y, badgeWidth, lineHeight), "\u2605");
+                x += badgeWidth + gap;
+            }
+
             // InputType popup
-            var typeRect = new Rect(rect.x, y, typeWidth, lineHeight);
+            var typeRect = new Rect(x, y, typeWidth, lineHeight);
             var newType = EditorGUI.Popup(typeRect, inputTypeProp.enumValueIndex, InputTypeLabels);
             if (newType != inputTypeProp.enumValueIndex)
                 inputTypeProp.enumValueIndex = newType;
@@ -341,11 +459,10 @@ namespace Sebanne.AfkManager.Editor
 
             if (inputType == AfkSourceInputType.AvatarPrefab)
             {
-                // ObjectField + ▼ prefab picker button
                 var btnRect = new Rect(scanRect.x - dropBtnWidth - gap, y, dropBtnWidth, lineHeight);
-                var fieldWidth = btnRect.x - (rect.x + typeWidth + gap);
+                var fieldWidth = btnRect.x - (x + typeWidth + gap);
                 if (fieldWidth < 40f) fieldWidth = 40f;
-                var fieldRect = new Rect(rect.x + typeWidth + gap, y, fieldWidth, lineHeight);
+                var fieldRect = new Rect(x + typeWidth + gap, y, fieldWidth, lineHeight);
 
                 EditorGUI.PropertyField(fieldRect, avatarPrefabProp, GUIContent.none);
 
@@ -354,25 +471,23 @@ namespace Sebanne.AfkManager.Editor
             }
             else
             {
-                var fieldWidth = scanRect.x - (rect.x + typeWidth + gap) - gap;
+                var fieldWidth = scanRect.x - (x + typeWidth + gap) - gap;
                 if (fieldWidth < 40f) fieldWidth = 40f;
-                var fieldRect = new Rect(rect.x + typeWidth + gap, y, fieldWidth, lineHeight);
+                var fieldRect = new Rect(x + typeWidth + gap, y, fieldWidth, lineHeight);
                 EditorGUI.PropertyField(fieldRect, sourceControllerProp, GUIContent.none);
             }
 
             // Scan info
             EnsureSlotCacheSize();
-            RefreshSlotScan(index);
-            DrawSlotScanInfo(scanRect, index);
+            RefreshSlotScan(sourceIndex);
+            DrawSlotScanInfo(scanRect, sourceIndex);
 
             // Row 2: SlotName (only when MA is needed)
             if (NeedsModularAvatar())
             {
                 y += lineHeight + spacing;
-
                 var nameRect = new Rect(rect.x, y, rect.width, lineHeight);
-                var isFallback = _originalAfkOrderProp.intValue == -1 && _actionSourcesProp.arraySize >= 2 && index == 0;
-                var labelText = isFallback ? "★ メニュー名" : "メニュー名";
+                var labelText = showFallbackBadge ? "\u2605 メニュー名" : "メニュー名";
                 EditorGUI.PropertyField(nameRect, slotNameProp, new GUIContent(labelText));
             }
         }
@@ -391,19 +506,78 @@ namespace Sebanne.AfkManager.Editor
 
         private void OnSlotAdd(ReorderableList list)
         {
-            var index = _actionSourcesProp.arraySize;
-            _actionSourcesProp.InsertArrayElementAtIndex(index);
+            var component = (AfkManagerComponent)target;
+            Undo.RecordObject(component, "Add AFK Slot");
 
-            var element = _actionSourcesProp.GetArrayElementAtIndex(index);
-            element.FindPropertyRelative("slotName").stringValue = "";
-            element.FindPropertyRelative("inputType").enumValueIndex = (int)AfkSourceInputType.AvatarPrefab;
-            element.FindPropertyRelative("avatarPrefab").objectReferenceValue = null;
-            element.FindPropertyRelative("sourceController").objectReferenceValue = null;
+            component.actionSources.Add(new AfkSlot
+            {
+                slotName = "",
+                inputType = AfkSourceInputType.AvatarPrefab,
+                avatarPrefab = null,
+                sourceController = null,
+            });
+
+            EditorUtility.SetDirty(component);
+            serializedObject.Update();
+            RebuildVirtualRows();
+            _slotScans = Array.Empty<SlotScanCache>();
+        }
+
+        private void OnSlotRemove(ReorderableList list)
+        {
+            var removeIndex = list.index;
+            if (removeIndex < 0 || removeIndex >= _virtualRows.Count) return;
+
+            var row = _virtualRows[removeIndex];
+            var component = (AfkManagerComponent)target;
+
+            if (row.IsOriginal)
+            {
+                Undo.RecordObject(component, "Exclude Original AFK");
+                component.originalAfkOrder = -1;
+            }
+            else
+            {
+                if (row.ActionSourceIndex < 0 || row.ActionSourceIndex >= component.actionSources.Count) return;
+                Undo.RecordObject(component, "Remove AFK Slot");
+                component.actionSources.RemoveAt(row.ActionSourceIndex);
+            }
+
+            EditorUtility.SetDirty(component);
+            serializedObject.Update();
+            RebuildVirtualRows();
+            _slotScans = Array.Empty<SlotScanCache>();
+
+            if (list.index >= _virtualRows.Count)
+                list.index = _virtualRows.Count - 1;
         }
 
         private void OnSlotReorder(ReorderableList list, int oldIndex, int newIndex)
         {
-            // Rebuild slot scan cache after reorder
+            // ReorderableList has already mutated _virtualRows in-place.
+            // Reconstruct actionSources order + originalAfkOrder from the new order.
+            var component = (AfkManagerComponent)target;
+            Undo.RecordObject(component, "Reorder AFK Slots");
+
+            var oldSources = new List<AfkSlot>(component.actionSources);
+            var newSources = new List<AfkSlot>(oldSources.Count);
+            var newOriginalOrder = component.originalAfkOrder;
+
+            for (var i = 0; i < _virtualRows.Count; i++)
+            {
+                var row = _virtualRows[i];
+                if (row.IsOriginal)
+                    newOriginalOrder = newSources.Count;
+                else if (row.ActionSourceIndex >= 0 && row.ActionSourceIndex < oldSources.Count)
+                    newSources.Add(oldSources[row.ActionSourceIndex]);
+            }
+
+            component.actionSources = newSources;
+            component.originalAfkOrder = newOriginalOrder;
+
+            EditorUtility.SetDirty(component);
+            serializedObject.Update();
+            RebuildVirtualRows();
             _slotScans = Array.Empty<SlotScanCache>();
         }
 
@@ -439,32 +613,30 @@ namespace Sebanne.AfkManager.Editor
         // Drag & Drop
         // =====================================================================
 
-        private void DrawEmptyListDropTarget(Rect rect)
+        private void DrawEmptyPickerInList(Rect rect)
         {
-            EditorGUI.LabelField(rect, "Avatar / Controller をドラッグして追加",
-                new GUIStyle(EditorStyles.centeredGreyMiniLabel) { alignment = TextAnchor.MiddleCenter });
-            HandleDragDropInRect(rect);
-        }
+            const float padding = 6f;
+            var lineHeight = EditorGUIUtility.singleLineHeight;
 
-        private void DrawDropArea()
-        {
-            if (_actionSourcesProp.arraySize == 0) return;
+            var buttonRect = new Rect(
+                rect.x + padding,
+                rect.y + padding,
+                rect.width - padding * 2,
+                lineHeight + 4f);
 
-            var dropArea = GUILayoutUtility.GetRect(0, 24, GUILayout.ExpandWidth(true));
+            if (GUI.Button(buttonRect, "アバター一覧から選ぶ \u25BC"))
+                ShowAvatarPrefabMenuForNewSlot();
 
-            var evt = Event.current;
-            var isHovering = (evt.type == EventType.DragUpdated || evt.type == EventType.DragPerform)
-                             && dropArea.Contains(evt.mousePosition);
-
-            var prevBg = GUI.backgroundColor;
-            if (isHovering && HasValidDragObjects())
-                GUI.backgroundColor = new Color(0.5f, 0.8f, 1f, 0.5f);
-
-            var style = new GUIStyle(EditorStyles.helpBox) { alignment = TextAnchor.MiddleCenter };
-            GUI.Box(dropArea, "ドラッグして追加", style);
-            GUI.backgroundColor = prevBg;
-
-            HandleDragDropInRect(dropArea);
+            var subLabelRect = new Rect(
+                rect.x + padding,
+                buttonRect.yMax + 4f,
+                rect.width - padding * 2,
+                lineHeight);
+            var subStyle = new GUIStyle(EditorStyles.centeredGreyMiniLabel)
+            {
+                alignment = TextAnchor.MiddleCenter
+            };
+            EditorGUI.LabelField(subLabelRect, "または Avatar / Controller をここにドラッグ", subStyle);
         }
 
         private void HandleDragDropInRect(Rect area)
@@ -512,16 +684,20 @@ namespace Sebanne.AfkManager.Editor
 
         private void AddSlotFromDrop(AfkSourceInputType inputType, GameObject prefab, RuntimeAnimatorController controller)
         {
-            var index = _actionSourcesProp.arraySize;
-            _actionSourcesProp.InsertArrayElementAtIndex(index);
+            var component = (AfkManagerComponent)target;
+            Undo.RecordObject(component, "Add AFK Slot (Drop)");
 
-            var element = _actionSourcesProp.GetArrayElementAtIndex(index);
-            element.FindPropertyRelative("slotName").stringValue = "";
-            element.FindPropertyRelative("inputType").enumValueIndex = (int)inputType;
-            element.FindPropertyRelative("avatarPrefab").objectReferenceValue = prefab;
-            element.FindPropertyRelative("sourceController").objectReferenceValue = controller;
+            component.actionSources.Add(new AfkSlot
+            {
+                slotName = "",
+                inputType = inputType,
+                avatarPrefab = prefab,
+                sourceController = controller,
+            });
 
-            serializedObject.ApplyModifiedProperties();
+            EditorUtility.SetDirty(component);
+            serializedObject.Update();
+            RebuildVirtualRows();
             _slotScans = Array.Empty<SlotScanCache>();
         }
 
@@ -752,16 +928,58 @@ namespace Sebanne.AfkManager.Editor
             menu.ShowAsContext();
         }
 
+        private void ShowAvatarPrefabMenuForNewSlot()
+        {
+            if (!_avatarPrefabsScanned) ScanAvatarPrefabs();
+
+            var menu = new GenericMenu();
+
+            for (var i = 0; i < _avatarPrefabs.Length; i++)
+            {
+                var prefab = _avatarPrefabs[i];
+                menu.AddItem(new GUIContent(_avatarPrefabNames[i]), false, () =>
+                {
+                    AddSlotFromPicker(prefab);
+                });
+            }
+
+            if (_avatarPrefabs.Length == 0)
+                menu.AddDisabledItem(new GUIContent("アバターが見つかりません"));
+
+            menu.AddSeparator("");
+            menu.AddItem(new GUIContent("再スキャン"), false, () =>
+            {
+                _avatarPrefabsScanned = false;
+                ScanAvatarPrefabs();
+            });
+
+            menu.ShowAsContext();
+        }
+
+        private void AddSlotFromPicker(GameObject prefab)
+        {
+            var component = (AfkManagerComponent)target;
+            Undo.RecordObject(component, "Add AFK Slot (Picker)");
+
+            component.actionSources.Add(new AfkSlot
+            {
+                slotName = "",
+                inputType = AfkSourceInputType.AvatarPrefab,
+                avatarPrefab = prefab,
+                sourceController = null,
+            });
+
+            EditorUtility.SetDirty(component);
+            serializedObject.Update();
+            RebuildVirtualRows();
+            _slotScans = Array.Empty<SlotScanCache>();
+        }
+
         // =====================================================================
         // Helpers
         // =====================================================================
 
-        private bool NeedsModularAvatar()
-        {
-            var sourceCount = _actionSourcesProp.arraySize;
-            var originalIncluded = _originalAfkOrderProp.intValue >= 0;
-            return sourceCount + (originalIncluded ? 1 : 0) >= 2;
-        }
+        private bool NeedsModularAvatar() => GetEffectiveSlotCount() >= 2;
 
 #if HAS_MODULAR_AVATAR
         // --- Menu tree reflection (static, one-time init) ---

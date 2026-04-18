@@ -7,8 +7,9 @@ VRChat アバターの AFK アニメーションを非破壊で管理する NDMF
 ## Current State
 
 2.0.0 コア実装完了（Step 1-5 + バグ修正 2 件 + 追加機能 6 件 + クローズアウト調整 5 件すべて完了）。ツール名変更: AFK Changer → AFK Manager。
-UI モデル転換 段階 1（データ層 + ビルド時処理層）完了。`originalAfkOrder` + effectiveSlots 前処理層 + ProcessAction effectiveSlots ベース再設計 + 1-based スロット値スキーム。Inspector は最小適応（チェックボックスは int-backed Toggle で旧挙動を維持）。
-残り: 段階 2（Inspector UI 刷新: 単一リスト並び替え型、元 AFK 行特殊描画、★ バッジ配置変更等）/ Step 6（local dir リネーム / CLAUDE.md 以外のドキュメント更新（README / TOOL_INFO / CHANGELOG / BOOTH_PACKAGE）/ sync-check → release → listing → BOOTH）。
+UI モデル転換 段階 1（データ層 + ビルド時処理層）完了。`originalAfkOrder` + effectiveSlots 前処理層 + ProcessAction effectiveSlots ベース再設計 + 1-based スロット値スキーム。
+UI モデル転換 段階 2（Inspector UI 刷新）完了。単一 ReorderableList 型 UI（VirtualRow モデル + dispatch 型描画。元 AFK 行 + 追加スロット行を同一リストに統合）、「元の AFK を含める」Toggle 常時表示、元 AFK 行の 2 行レイアウト（固定ラベル「元の AFK」+ スキャン結果 miniLabel + メニュー名 PropertyField）、★ バッジ（effectiveSlotCount >= 2 の先頭行）、P3 空時ピッカー（「アバター一覧から選ぶ ▼」+ サブテキスト）、Drop Area 統合（ReorderableList 全体を D&D 受付 + ホバー時に薄青オーバーレイ）、fallback hint miniLabel 文言に ★ 付加。
+残り: Step 6（local dir リネーム / CLAUDE.md 以外のドキュメント更新（README / TOOL_INFO / CHANGELOG / BOOTH_PACKAGE）/ sync-check → release → listing → BOOTH）。
 
 Step 1（土台）完了: namespace 変更（Sebanne.AfkChanger → Sebanne.AfkManager）、ファイルリネーム、Component フィールド刷新（付け外し型 UI のデータモデル）、asmdef に MA Version Defines 追加。Plugin は最小適応（actionSources[0] 読み出し + removeFxAfk）。
 Step 2（Inspector）完了: 付け外し型 UI 実装。Action セクション（ReorderableList でスロット一覧、スキャン結果表示、MA 必須判定 + Warning/Info）、FX セクション（スキャン結果 + 削除チェックボックス）。
@@ -59,7 +60,7 @@ Component/Inspector 詳細設計確定（付け外し型 UI）。
 - AfkMenuGenerator: MA Menu Item + Parameters をビルド時生成（#if HAS_MODULAR_AVATAR。Generating フェーズ）
 - AfkManagerPlugin: NDMF 2パス（Pass 1: Generating で MA 生成、Pass 2: Transforming.AfterPlugin("MA") で実操作）。ProcessAction / ProcessFx で操作を分離。複数スロット対応
 - ControllerDumper: Tools メニュー / Assets 右クリック / Hierarchy 右クリックの3箇所起動。毎回新規ファイル生成（dump_{name}_{timestamp}.txt）
-- AfkManagerEditor: Custom Editor。付け外し型 UI（Action セクション + FX セクション）。ReorderableList でスロット一覧、スロットごとスキャンキャッシュ、MA 必須判定
+- AfkManagerEditor: Custom Editor。単一 ReorderableList 型 UI（VirtualRow モデル + dispatch 型描画）。Action セクション（元 AFK 行統合、★ バッジ、P3 空時ピッカー、全体 D&D + ホバー視覚フィードバック）+ FX セクション。スロットごとスキャンキャッシュ、MA 必須判定
 - ActionControllerResolver: Descriptor → 指定レイヤー → AnimatorController 取得ロジック共通化（AnimLayerType パラメータ化済み）
 - AfkStateScanner.ScanFxLayers: FX コントローラーの全レイヤーを走査し、AFK ステートを持つレイヤーの結果をリストで返す
 
@@ -243,15 +244,43 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 - Inspector の OnInspectorGUI 冒頭で描画
 - パス表示は AnimationUtility.CalculateTransformPath、Ping は EditorGUIUtility.PingObject + Selection.activeGameObject
 
+### VirtualRow + ReorderableList 非 SerializedProperty バインド
+
+- ReorderableList を SerializedProperty バインドではなく自前の `List<VirtualRow>` にバインドすると、元 AFK + actionSources の合成リストを単一リストとして扱える
+- VirtualRow: `{ bool IsOriginal; int ActionSourceIndex }`（IsOriginal=true のとき ActionSourceIndex=-1）
+- `RebuildVirtualRows()`: `_virtualRows.Clear()` 後、actionSources を先に Add、`originalAfkOrder >= 0` ならクランプ位置に Original を Insert。OnInspectorGUI 冒頭 + 各ミューテーション callback 後に呼ぶ（idempotent）
+- Undo: `Undo.RecordObject(target, "...") + EditorUtility.SetDirty(target) + serializedObject.Update() + RebuildVirtualRows()` の idiom で全ミューテーション（Add/Remove/Reorder/Picker/Drop/Toggle）を統一
+- PropertyField 系（メニュー名・InputType・ObjectField・slotName）は SerializedProperty 経由で Unity 自動 Undo
+
+### ReorderableList 全体への D&D 統合
+
+- `_slotList.DoLayoutList()` 直後に `GUILayoutUtility.GetLastRect()` で全体 Rect（ヘッダー + 要素領域 + フッター全て含む）取得 → `HandleDragDropInRect(listRect)` で枠内のどこにドロップしても D&D 受付
+- ボタンクリック（MouseDown 型）と D&D（DragUpdated/DragPerform 型）はイベント種別が異なるので衝突しない。P3 ボタン領域内へドロップ時も D&D が優先される（`HandleDragDropInRect` が `DragPerform` で `evt.Use()` するため）
+
+### D&D ホバー視覚フィードバック
+
+- DragUpdated/DragPerform で `_isDragHovering = listRect.Contains(mouse) && HasValidDragObjects()`、DragExited/MouseUp でクリア
+- Repaint イベント時に `EditorGUI.DrawRect(listRect, new Color(0.5f, 0.8f, 1f, 0.15f))` で半透明オーバーレイ
+- Unity は DragUpdated 後に自動 Repaint トリガーするのでホバー状態変化は即座に画面反映
+
+### ReorderableList 空要素領域の高さ確保
+
+- `_slotList.elementHeight = 60f` で `drawNoneElementCallback` の描画領域が 60px 確保される
+- `elementHeightCallback` 設定時は要素ある時の高さには影響しない（elementHeight は空時のみ効く）
+- 空時に P3 ボタン + サブテキストのような拡張描画を入れる時に使える
+
 ## UI
 
 - アバタールートに付ける MonoBehaviour コンポーネント（AfkManagerComponent）
 - Action セクション（helpBox 枠）:
-  - 「現在の AFK」miniLabel（アバターの Action Controller をスキャンして表示）
-  - 「元の AFK を外す」チェックボックス（originalAfkOrder の -1/0 バインド）
-  - 「付ける AFK」ReorderableList（ドラッグ並べ替え対応）
-  - 各スロット: InputType Popup（Avatar/Prefab or Controller）+ ObjectField + スキャン結果 miniLabel
-  - MA 必須構成の時のみスロット名フィールド表示
+  - 「元の AFK を含める」Toggle（ReorderableList の上、常時表示。ON = `originalAfkOrder >= 0` / OFF = `-1`。OFF → ON 時は `originalAfkOrder = 0`）
+  - 「AFK スロット」単一 ReorderableList（元 AFK 行 + 追加スロット行を統合。VirtualRow モデルで合成）
+    - 元 AFK 行の 2 行レイアウト: Row 1 = ドラッグハンドル + ★バッジ（条件付き） + 固定ラベル「元の AFK」(bold) + スキャン結果 miniLabel（アバターの Action Controller から取得） / Row 2 = MA 必須時のみ メニュー名 PropertyField（`originalAfkMenuName`）
+    - 追加スロット行の 2 行レイアウト: Row 1 = ドラッグハンドル + ★バッジ（条件付き） + InputType Popup（Avatar/Prefab or Controller） + ObjectField + ▼ ミニボタン（AvatarPrefab 時のみ、プレハブリストピッカー起動） + スキャン結果 miniLabel / Row 2 = MA 必須時のみ メニュー名 PropertyField（`slotName`）
+  - ★ バッジ条件: 先頭行のみ表示、`effectiveSlotCount >= 2` の時（元 AFK 行が先頭でも同条件）
+  - fallback hint miniLabel: `effectiveSlotCount >= 2` の時に「★ 先頭スロットがメニュー OFF 時のデフォルトになります」を ReorderableList 下に表示
+  - P3 空時ピッカー: `_virtualRows.Count == 0` の時、`drawNoneElementCallback` で「アバター一覧から選ぶ ▼」ボタン + サブテキスト「または Avatar / Controller をここにドラッグ」を描画
+  - Drop Area: ReorderableList 全体 Rect（ヘッダー + 要素領域 + フッター全て含む）を D&D 受付。ホバー時に薄青オーバーレイ（`Color(0.5f, 0.8f, 1f, 0.15f)`）
 - FX セクション（helpBox 枠）:
   - 「現在の FX AFK」miniLabel + 「元の FX AFK を外す」チェックボックス
 - 表示ルール:
