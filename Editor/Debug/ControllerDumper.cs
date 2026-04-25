@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Sebanne.AfkManager.Editor.Debug
 {
-    internal static class ControllerDumper
+    public static class ControllerDumper
     {
         private const string OutputDir = "Assets/_Temp";
 
@@ -97,6 +97,20 @@ namespace Sebanne.AfkManager.Editor.Debug
 
         // --- Core ---
 
+        public static string DumpControllerAtPath(string assetPath)
+        {
+            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(assetPath);
+            if (controller == null)
+            {
+                UnityEngine.Debug.LogWarning($"[AFK Manager] No AnimatorController at {assetPath}.");
+                return null;
+            }
+            var content = BuildDump(controller);
+            var path = WriteToFile(content, controller.name);
+            UnityEngine.Debug.Log($"[AFK Manager] Controller dump saved to {path}");
+            return path;
+        }
+
         private static void DumpAndWrite(AnimatorController controller)
         {
             var content = BuildDump(controller);
@@ -164,7 +178,12 @@ namespace Sebanne.AfkManager.Editor.Debug
                 var s = cs.state;
                 var motionName = s.motion != null ? s.motion.name : "(none)";
                 var isDefault = sm.defaultState == s ? " [DEFAULT]" : "";
-                sb.AppendLine($"{indent}  [{s.name}]{isDefault}  motion={motionName}  wdv={s.writeDefaultValues}  pos=({cs.position.x:F0},{cs.position.y:F0})");
+                var tagStr = string.IsNullOrEmpty(s.tag) ? "" : $"  tag={s.tag}";
+                var speedParam = s.speedParameterActive ? $"  speedParam={s.speedParameter}" : "";
+                var timeParam = s.timeParameterActive ? $"  timeParam={s.timeParameter}" : "";
+                var mirrorParam = s.mirrorParameterActive ? $"  mirrorParam={s.mirrorParameter}" : "";
+                var cycleParam = s.cycleOffsetParameterActive ? $"  cycleParam={s.cycleOffsetParameter}" : "";
+                sb.AppendLine($"{indent}  [{s.name}]{isDefault}  motion={motionName}  wdv={s.writeDefaultValues}  speed={s.speed:F2}  mirror={s.mirror}  ikOnFeet={s.iKOnFeet}  cycleOffset={s.cycleOffset:F2}{tagStr}{speedParam}{timeParam}{mirrorParam}{cycleParam}  pos=({cs.position.x:F0},{cs.position.y:F0})");
 
                 // State Behaviours
                 if (s.behaviours != null && s.behaviours.Length > 0)
@@ -173,18 +192,24 @@ namespace Sebanne.AfkManager.Editor.Debug
                         sb.AppendLine($"{indent}    behaviour: {FormatBehaviour(b)}");
                 }
 
-                // Transitions from this state
-                foreach (var t in s.transitions)
-                    sb.AppendLine($"{indent}    -> {FormatTransitionDest(t)}  {FormatConditions(t)}  exitTime={t.hasExitTime}/{t.exitTime:F2}  dur={t.duration:F2}");
+                // Transitions from this state (with index for ordering)
+                for (var ti = 0; ti < s.transitions.Length; ti++)
+                {
+                    var t = s.transitions[ti];
+                    sb.AppendLine($"{indent}    [{ti}]-> {FormatTransitionDest(t)}  {FormatConditions(t)}  exitTime={t.hasExitTime}/{t.exitTime:F2}  dur={t.duration:F2}  offset={t.offset:F2}  canSelf={t.canTransitionToSelf}  ordInt={t.orderedInterruption}  intSrc={t.interruptionSource}  mute={t.mute}  solo={t.solo}");
+                }
             }
             sb.AppendLine();
 
-            // AnyState Transitions
+            // AnyState Transitions (with index)
             if (sm.anyStateTransitions.Length > 0)
             {
                 sb.AppendLine($"{indent}AnyState Transitions ({sm.anyStateTransitions.Length}):");
-                foreach (var t in sm.anyStateTransitions)
-                    sb.AppendLine($"{indent}  AnyState -> {FormatTransitionDest(t)}  {FormatConditions(t)}  exitTime={t.hasExitTime}/{t.exitTime:F2}  dur={t.duration:F2}  canSelf={t.canTransitionToSelf}");
+                for (var ti = 0; ti < sm.anyStateTransitions.Length; ti++)
+                {
+                    var t = sm.anyStateTransitions[ti];
+                    sb.AppendLine($"{indent}  [{ti}] AnyState -> {FormatTransitionDest(t)}  {FormatConditions(t)}  exitTime={t.hasExitTime}/{t.exitTime:F2}  dur={t.duration:F2}  offset={t.offset:F2}  canSelf={t.canTransitionToSelf}  ordInt={t.orderedInterruption}  intSrc={t.interruptionSource}  mute={t.mute}  solo={t.solo}");
+                }
                 sb.AppendLine();
             }
 
@@ -282,8 +307,47 @@ namespace Sebanne.AfkManager.Editor.Debug
                 case SerializedPropertyType.Enum: return prop.enumDisplayNames.Length > prop.enumValueIndex && prop.enumValueIndex >= 0
                     ? prop.enumDisplayNames[prop.enumValueIndex] : prop.enumValueIndex.ToString();
                 case SerializedPropertyType.ObjectReference: return prop.objectReferenceValue != null ? prop.objectReferenceValue.name : "(null)";
-                default: return $"({prop.propertyType})";
+                default:
+                    if (prop.isArray)
+                        return FormatArray(prop);
+                    if (prop.propertyType == SerializedPropertyType.Generic && prop.hasChildren)
+                        return FormatComposite(prop);
+                    return $"({prop.propertyType})";
             }
+        }
+
+        private static string FormatArray(SerializedProperty arrayProp)
+        {
+            var sb = new StringBuilder("[");
+            for (var i = 0; i < arrayProp.arraySize; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var elem = arrayProp.GetArrayElementAtIndex(i);
+                sb.Append(FormatSerializedValue(elem));
+            }
+            sb.Append("]");
+            return sb.ToString();
+        }
+
+        private static string FormatComposite(SerializedProperty parent)
+        {
+            var sb = new StringBuilder("{");
+            var endProp = parent.GetEndProperty();
+            var iter = parent.Copy();
+            if (!iter.NextVisible(true) || SerializedProperty.EqualContents(iter, endProp))
+            {
+                sb.Append("}");
+                return sb.ToString();
+            }
+            var first = true;
+            do
+            {
+                if (!first) sb.Append(", ");
+                first = false;
+                sb.Append($"{iter.name}={FormatSerializedValue(iter)}");
+            } while (iter.NextVisible(false) && !SerializedProperty.EqualContents(iter, endProp));
+            sb.Append("}");
+            return sb.ToString();
         }
 
         private static string FormatDefault(AnimatorControllerParameter p)
