@@ -207,7 +207,7 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 - Pass 1（Generating）: MA コンポーネント生成（Add 操作用の ModularAvatarMenuItem 等）
 - MA が Transforming フェーズで処理（MenuInstall / ParameterAssigner 等）
 - Pass 2（Transforming.AfterPlugin("MA")）: Action/FX の実操作を実行
-- 現行 1.0.x の AfterPlugin("MA") in Generating は、MA が Generating にパスを持たないため実質無効
+- 旧 1.0.x の AfterPlugin("MA") in Generating は、MA が Generating にパスを持たないため実質無効だった
 - NDMF の constraint はフェーズローカル（クロスフェーズ制約は禁止。PluginResolver が例外を投げる）
 
 ### AnyState transition conditions
@@ -309,4 +309,4 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 
 ## 次フェーズ候補
 
-Notion 次フェーズ候補 DB（リポ=AFK Manager）を参照。
+knowledge-base `next-phase/tool-dev.md`「AFK Manager」節（後回しの正本）を参照。旧 Notion 次フェーズ候補 DB は凍結。
