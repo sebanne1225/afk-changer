@@ -236,4 +236,4 @@ VRChat の AFK は Action Layer で動作。`AFK` Bool パラメータ（VRChat 
 
 ## 次フェーズ候補
 
-knowledge-base `next-phase/tool-dev.md`「AFK Manager」節（後回しの正本）を参照。旧 Notion 次フェーズ候補 DB は凍結。
+knowledge-base `records/next-phase/tool-dev.md`「AFK Manager」節（後回しの正本）を参照。旧 Notion 次フェーズ候補 DB は凍結。
