@@ -53,33 +53,13 @@ VRChat アバターの AFK アニメーションを非破壊で管理する NDMF
 - 削除処理は AfkOperationEngine.Delete() に統合（旧 AfkFxProcessor.Clean / AfkStateReplacer.RemoveAfkStatesFlat を統合）
 - FX Replace（入れ替え）は次フェーズ
 
-## 入力
-
-- Action: AfkSlot のリストで指定。各スロットは Avatar/Prefab または Controller 入力。originalAfkOrder で元 AFK の位置制御（-1 = 削除、0+ = リスト内位置）
-
-- FX: removeFxAfk で FX レイヤーの AFK パラメータ関連ステートを削除
-
-## アーキテクチャ
-
-- MonoBehaviour コンポーネント（AfkManagerComponent。アバタールートに設置）
-
-- NDMF プラグイン（2パス構成。Pass 1 = Generating で MA コンポーネント生成、Pass 2 = Transforming.AfterPlugin("MA") で実操作）
-
-- 非破壊: ビルド時にクローン上で処理。元の Animator は変更しない
-
 ## ファイル構成
 
-- `Runtime/AfkManagerComponent.cs` — MonoBehaviour + AfkSlot + AfkSourceInputType。originalAfkOrder / actionSources / menuInstallTarget / originalAfkMenuName / removeFxAfk
 - `Editor/AfkManagerPlugin.cs` — NDMF Plugin。Generating フェーズで AFK 処理実行
 - `Editor/AfkManagerEditor.cs` — CustomEditor。付け外し型 UI（Action / FX セクション、ReorderableList、スキャンキャッシュ）
 - `Editor/Core/AfkStateScanner.cs` — BFS 走査 + content/skeleton 分類
 - `Editor/Core/AfkOperationEngine.cs` — Delete / Replace / Add 操作 + SlotParameter 管理。旧 Replacer + FxProcessor 統合
 - `Editor/Core/EffectiveSlot.cs` — originalAfkOrder + actionSources から合成した effectiveSlots の型 + Build 静的メソッド
-- `Editor/Core/AfkScanResult.cs` — スキャン結果データクラス
-- `Editor/Core/ActionControllerResolver.cs` — Descriptor → 指定レイヤー → AnimatorController 取得ロジック共通化（AnimLayerType パラメータ化）
-- `Editor/Core/AfkOperationContext.cs` — 操作コンテキスト（ForAction / ForFxLayer ファクトリ）
-- `Editor/Core/AfkMenuGenerator.cs` — MA Menu Item + Parameters 生成（#if HAS_MODULAR_AVATAR）
-- `Editor/Core/AfkLog.cs` — ログユーティリティ（[AFK Manager] プレフィックス）
 
 ## AFK ステート構造の実態
 
